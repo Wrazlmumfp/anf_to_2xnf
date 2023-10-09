@@ -8,7 +8,7 @@
 
 `input.anf` is a text file with the following structure:
 
-- The first line contains all indeterminates (= unicode strings not containing spaces and not being iqual to "1" or "0") separated with a comma and AT LEAST ONE SPACE (important for reading in indeterminates of the form `x[1,1]`),
+- The first line contains all indeterminates (= unicode strings not containing spaces and not being equal to `1` or `0`) separated with a comma and AT LEAST ONE SPACE (important for reading in indeterminates of the form `x[1,1]`),
 - All other lines contain each exactly one polynomial,
 - Polynomials are sums (`+`) of terms and a term is a product (`*`) of indeterminates or simply `1`,
 - Lines marked with `#` at the start are treated as comment lines.
