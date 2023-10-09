@@ -669,11 +669,9 @@ def readPolySys(path,indetDict):
     # create indeterminate list
     indets = L[0].replace("\n","").split(", ")
     # delete spaces and tabs in single indeterminates
-    indets = [i.replace(" ","") for i in indets]
+    indets = [i.replace(" ","").replace("\t","") for i in indets]
     # remove empty indeterminates
     indets = [i for i in indets if not(i == "")]
-    for i,l in enumerate(indets):
-        indets[i] = l.replace(" ","").replace("\t","")
     # remove spaces, tabs, newlines and exponents from polynomial strings
     for i,l in enumerate(L):
         L[i] = l.replace(" ","").replace("\t","").replace("\n","")
