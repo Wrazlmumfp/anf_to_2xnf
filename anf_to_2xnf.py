@@ -6,12 +6,11 @@
 import sys, os, time
 from xnf import *
 from anf import *
+import numpy as np
 import random
 import itertools
 import subprocess
 
-# field with two elements for galois package
-F2 = None
 
 # set storing all substitutions
 subs = set()
@@ -174,172 +173,6 @@ def findSub_MaxSAT(anf):
     return sub
 
 
-def findOptimalSubs(anf):
-    """
-    Uses CryptoMiniSat to convert anf optimal (i.e. with a minimal number of substitutions).
-    Needs CryptoMiniSat to be installed, see https://github.com/msoos/cryptominisat.
-    Input has to be a quadratic Anf.
-    """
-    global args
-    inds = list(anf.getHomogComp(2).variables())
-    n = len(inds)
-    assert(anf.deg() == 2)
-    # solving part
-    # increase r until a solution is found
-    r = 1
-    while "apples"!="oranges": # fancy way of writing "while True"
-        if args.verbosity >= 50:
-            print(f"findOptimalSubs: Starting iteration Nr. {r}"+" "*30)
-        # first create XNF containing all hard clauses
-        clauses = []
-        # create additional variables
-        # f = (sum from k=1 to r) (A[k,0]+A[k,1]*x[1]+...+A[k,n]*x[n])(B[k,0]+B[k,1]*x[1]+...+B[k,n]*x[n])
-        # Y[k,i,j] additional variable for A[k,i]B[k,j]
-        A = dict()
-        B = dict()
-        Y = dict()
-        # first initialize A and B for better readability of the output
-        numVars = 1
-        for k in range(1,r+1):
-            for i in range(n+1):
-                A[k,i] = numVars; numVars+=1;
-        for k in range(1,r+1):
-            for i in range(n+1):
-                B[k,i] = numVars; numVars+=1;
-        for k in range(1,r+1):
-            for i in range(n+1):
-                for j in range(n+1):
-                    Y[k,i,j] = numVars; numVars += 1;
-        # add clauses to xnf
-        # first definition of additional variables
-        for k in range(1,r+1):
-            for i in range(n+1):
-                for j in range(n+1):
-                    clauses.extend([xClause([[-Y[k,i,j]], [A[k,i]]]),
-                                    xClause([[-Y[k,i,j]], [B[k,j]]]),
-                                    xClause([[Y[k,i,j]], [-A[k,i]], [-B[k,j]]])])
-        # (linear) clauses for c_ij
-        for i in range(1,n+1):
-            for j in range(i+1,n+1):
-                l = sum([lineral([Y[k,i,j],Y[k,j,i]]) for k in range(1,r+1)],lineral([]))
-                if Term([inds[i-1],inds[j-1]]) in anf.support:
-                    clauses.append(xClause([l]))
-                else:
-                    clauses.append(xClause([l.Not()]))
-        # (linear) clauses for c_ii
-        for i in range(1,n+1):
-            l = sum([lineral([Y[k,i,i],Y[k,0,i],Y[k,i,0]]) for k in range(1,r+1)],lineral([]))
-            if Term([inds[i-1]]) in anf.support:
-                clauses.append(xClause([l]))
-            else:
-                clauses.append(xClause([l.Not()]))
-        # (linear) clause for c_0
-        l = lineral([Y[k,0,0] for k in range(1,r+1)])
-        if Term([]) in anf.support:
-            clauses.append(xClause([l]))
-        else:
-            clauses.append(xClause([l.Not()]))
-        x = Xnf(clauses,numVars)
-        if args.verbosity >= 50:
-            print(f"Solving XNF with {x.getNumVars()} variables and {x.getNumClauses()} clauases...",end="\r")
-        sat, solution = x.solve()
-        if sat:
-            break
-        else:
-            r += 1
-    # construct substitutions
-    subs = set()
-    for k in range(1,r+1):
-        a = {inds[i-1] for i in range(1,n+1) if solution[A[k,i]]}
-        b = {inds[i-1] for i in range(1,n+1) if solution[B[k,i]]}
-        if solution[A[k,0]]:
-            a.add(0)
-        if solution[B[k,0]]:
-            b.add(0)
-        if a == b:
-            continue
-        if args.verbosity >= 50:
-            print(f"Found sub: {a}x{b}"+" "*30)
-        subs.add(Sub([frozenset(a-{0}),frozenset(b-{0})]))
-    return subs
-
-
-def findOptimalSubs_quad(anf):
-    """
-    Same as findOptimalSubs, but only finds substitutions that substitute quadratic terms (and not linear ones).
-    Needs CryptoMiniSat to be installed, see https://github.com/msoos/cryptominisat.
-    Input has to be a quadratic Anf.
-    """
-    global args
-    inds = list(anf.getHomogComp(2).variables())
-    n = len(inds)
-    assert(anf.deg() <= 2)
-    # solving part
-    # increase r until a solution is found
-    r = 1
-    while "apples"!="oranges": # fancy way of writing "while True"
-        if args.verbosity >= 50:
-            print(f"findOptimalSubs: Starting iteration Nr. {r}"+" "*30)
-        # first create XNF containing all hard clauses
-        clauses = []
-        # create additional variables
-        # (quad part of f) = (sum from k=1 to r) (A[k,1]*x[1]+...+A[k,n]*x[n])(B[k,1]*x[1]+...+B[k,n]*x[n])
-        # Y[k,i,j] additional variable for A[k,i]B[k,j]
-        A = dict()
-        B = dict()
-        Y = dict()
-        # first initialize A and B for better readability of the output
-        numVars = 1
-        for k in range(1,r+1):
-            for i in range(1,n+1):
-                A[k,i] = numVars; numVars+=1;
-        for k in range(1,r+1):
-            for i in range(1,n+1):
-                B[k,i] = numVars; numVars+=1;
-        for k in range(1,r+1):
-            for i in range(1,n+1):
-                for j in range(1,n+1):
-                    Y[k,i,j] = numVars; numVars += 1;
-        # add clauses to xnf
-        # first definition of additional variables
-        for k in range(1,r+1):
-            for i in range(1,n+1):
-                for j in range(1,n+1):
-                    clauses.extend([xClause([[-Y[k,i,j]], [A[k,i]]]),
-                                    xClause([[-Y[k,i,j]], [B[k,j]]]),
-                                    xClause([[Y[k,i,j]], [-A[k,i]], [-B[k,j]]])])
-        # (linear) clauses for c_ij
-        for i in range(1,n+1):
-            for j in range(i+1,n+1):
-                l = sum([lineral([Y[k,i,j],Y[k,j,i]]) for k in range(1,r+1)],lineral([]))
-                if Term([inds[i-1],inds[j-1]]) in anf.support:
-                    clauses.append(xClause([l]))
-                else:
-                    clauses.append(xClause([l.Not()]))
-        # A[k,i] and B[k,i] can never both be 1
-        for k in range(1,r+1):
-            for i in range(1,n+1):
-                clauses.append(xClause([[-A[k,i]],[-B[k,i]]]))
-        x = Xnf(clauses,numVars)
-        if args.verbosity >= 50:
-            print(f"Solving XNF with {x.getNumVars()} variables and {x.getNumClauses()} clauses...",end="\r")
-        sat, solution = x.solve()
-        if sat:
-            break
-        else:
-            r += 1
-    # construct substitutions
-    subs = set()
-    for k in range(1,r+1):
-        a = {inds[i-1] for i in range(1,n+1) if solution[A[k,i]]}
-        b = {inds[i-1] for i in range(1,n+1) if solution[B[k,i]]}
-        if a == b:
-            continue
-        if args.verbosity >= 50:
-            print("Found sub: " + str(a) + "x" + str(b)+" "*30)
-        subs.add(Sub([frozenset(a),frozenset(b)]))
-    return subs
-
 
 def findSubs_linalg(anf):
     """
@@ -353,21 +186,8 @@ def findSubs_linalg(anf):
             return frozenset(l.variables()^{0})
         else:
             return frozenset(l.variables())
-    return [ Sub([toSubFac(l1),toSubFac(l2)]) for l1,l2 in optimal_repr(anf,args.verbosity)[0] ]
+    return [ Sub([toSubFac(l1),toSubFac(l2)]) for l1,l2 in optimal_repr(anf,args.verbosity)[0][1:] ]
         
-    
-
-
-
-
-def linPolyToXLit(f):
-    """Takes a linear polynomial f and returns an lineral F with Z(f)=S(F)."""
-    if Term() in f.getSupport():
-        return lineral([t.getIndets().pop() for t in f.getSupport()-{Term()}],True)
-    else:
-        return lineral([t.getIndets().pop() for t in f.getSupport()],False)
-    
-
 
 
 def sub_size(sub):
@@ -382,16 +202,20 @@ def sub_size(sub):
 
 # Sub = Substitution
 # facs is of the form [frozenset({i1,...,in}),frozenset({j1,...,jm})] for natural numbers i,j.
-# represents substitution (x[i1]+...+x[in])(x[j1]+...+x[jn]) -> x[name] where x[0] == 1
+# represents substitution (x[i1]+...+x[in])(x[j1]+...+x[jm]) -> x[name] where x[0] == 1
 # 1 is represented as 0, i.e. frozenset({1,2,0}) represents x[1]+x[2]+1
 numSubs = 0 # number of instances of the class Sub
 class Sub:
     indet = 0
-    facs = 0 # [frozenset(int),frozenset(int)]
+    facs = [] # [frozenset(int),...,frozenset(int)]
+    indets = None
+    anf = None
+    is_term = False
     def __init__(self, facs): # assumes facs is already of the desired form
         global indetDict
         global numSubs
         assert(not(frozenset() in facs))
+        assert(len(facs) > 1)
         # key uses spaces so that it can not be one of the original variables
         key = "[var for (" + ")*(".join([str(Anf([[i] for i in fac-{0}])+(1 if 0 in fac else 0)) for fac in facs]) + ")]"
         # if same variable as this one already exist, create this as duplicate
@@ -403,6 +227,8 @@ class Sub:
             indetDict[key] = self.indet
             numSubs += 1
         self.facs = facs
+        if all(len(f) == 1 for f in self.facs):
+            self.is_term = True
     def __str__(self):
         global indetDict
         return indStr(self.indet) + " replaces (" + ")*(".join([str(Anf([[i] for i in fac-{0}])+(1 if 0 in fac else 0)) for fac in self.facs]) + ")"
@@ -417,67 +243,88 @@ class Sub:
     def applyTo(self,poly):
         """Takes a polynomial and returns the polynomial after substituting self in it."""
         return poly + self.getAnf()
+    def isTerm(self):
+        """Returns whether self is of the form y+x1*...*xr."""
+        return self.is_term
     def getAnf(self):
         """Returns y+l1*l2 where y=self.indet and l1, l2 are the factors."""
-        return Anf([[self.indet]]) \
-            +(Anf(self.facs[0]-{0})+(1 if 0 in self.facs[0] else 0)) \
-            *(Anf(self.facs[1]-{0})+(1 if 0 in self.facs[1] else 0))
+        if self.anf is None:
+            self.anf = Anf([[self.indet]]) \
+                +np.prod([ Anf(fac-{0}) + (1 if 0 in fac else 0) for fac in self.facs ])
+        return self.anf
     def getFacs(self):
         """Returns the factors l1,l2 of this substitution."""
         return self.facs
     def getSize(self):
+        assert(len(self.facs) == 2)
         return sub_size(self.facs)
     def getIndet(self):
         """Returns the additional indeterminate for this substitution."""
         return self.indet
+    def getIndets(self):
+        if self.indets is None:
+            self.indets = set().union(*self.facs)
+        return self.indets
     def getXnf(self):
-        """Returns an Xnf representation of this substitution."""
         global args
         y = lineral([self.indet],True);
-        l1 = lineral(self.facs[0]-{0},0 in self.facs[0]);
-        l2 = lineral(self.facs[1]-{0},0 in self.facs[1]);
-        if args.txnf:
-            if args.moreclauses:
-                return Xnf([xClause([y+1,l1+1]),
-                            xClause([y+1,l2+1]),
-                            xClause([y+1,l1+1,l2]),
-                            xClause([y,l2,l1])
-                            ])
-            else:
-                # cannot be made more sparse, so --sparse leads here
-                return Xnf([xClause([y+1,l1+1]),
-                            xClause([y+1,l2+1]),
-                            xClause([y,l2,l1])
-                            ])                
-        else:
-            if args.sparse:
-                return Xnf([xClause([y+1,l2+1]),
-                            xClause([y+l1,l2]),
-                            ])
-            elif args.moreclauses:
-                return Xnf([xClause([y+1,l1+1]),
-                            xClause([y+1,l2+1]),
-                            xClause([y+1,y+l1+l2]),
-                            xClause([y+l1,l2]),
-                            xClause([y+l2,l1]),
-                            xClause([y+l2,y+l1])
-                            ])
-            else:
-                return Xnf([xClause([y+1,l1+1]),
-                            xClause([y+1,l2+1]),
-                            xClause([y+l1,l2]),
-                            ])
-                
+        lins = [ lineral(fac-{0}, 0 in fac) for fac in self.facs ]
+        return special_poly_to_xnf(y,lins)
+
+def special_poly_to_xnf(y,lins):
+    """
+    Returns the XNF representation of a polynomial of the form y+product(L) where y and all elements of L are linear polynomials.
+    """
+    global args
+    if isinstance(y,Anf):
+        y = lineral(y+1)
+    lins = [ lineral(l) if isinstance(l,Anf) else l for l in lins ]
+    assert([args.sparse,args.moreclauses,args.fewer_linerals].count(True) < 2)
+    if args.sparse:
+        return Xnf([ xClause([y+lins[0]] + lins[1:]) ] \
+                   +[ xClause([y+1, l+1]) for l in lins[1:] ]
+                   )
+    elif args.moreclauses:
+        # compute all sums of linerals in lins
+        k = len(lins)
+        subsets = itertools.chain.from_iterable(itertools.combinations(lins,r) for r in range(2,len(lins)+1))
+        lins_sums = list({ sum(subset,lineral([], not(len(subset)%2))) for subset in subsets }-set(lins))
+        return Xnf([ xClause([y+l1] + [l for l in lins if not(l == l1)]) for l1 in lins ] \
+                   +[ xClause([ y+1, l+1 ]) for l in lins+lins_sums ]
+                   )
+    elif args.fewer_linerals:
+        return Xnf([ xClause([ y, lins[0] ] + lins[1:]) ] \
+                   +[ xClause([ y+1, lins[0]+1 ] + lins[1:]) ] \
+                   +[ xClause([ y+1, l+1 ]) for l in lins ]
+                   )
+    else:
+        return Xnf([ xClause([y+lins[0]] + lins[1:]) ] \
+                   +[ xClause([ y+1, l+1 ]) for l in lins ]
+                   )
+    
+    
 
 def applySubs(subs,g):
     """Takes a list or set of substitutions subs and applies them to a polynomial g if this reduces the number of quadratic terms."""
     for sub in subs:
-        n = g.numTerms_nonLin()
         new = sub.applyTo(g)
-        if new.numTerms_nonLin() < n:
-            g = new
+        if new.numTerms_nonLin() < g.numTerms_nonLin():
             if args.verbosity >= 40:
-                print(f"Applied old sub! Now reduced from {n} terms to {g.numTerms_nonLin()} terms")
+                print(f"Applied old sub! Reduced quad terms of g from {g.numTerms_nonLin()} to {new.numTerms_nonLin()}.")
+            g = new
+    return g
+
+
+def applySubs_qrk(subs,g):
+    """Same as applySubs, but uses the quadratic rank to decide whether to apply a substitution."""
+    for sub in subs:
+        if g.qrk() == 1: break;
+        new = sub.applyTo(g)
+        if new.qrk() < g.qrk():
+            print("applied!")
+            if args.verbosity >= 40:
+                print(f"Applied old sub! Reduced qrk of g {g.qrk()} to {g.qrk()-1}.")
+            g = new
     return g
 
 
@@ -486,8 +333,10 @@ def anf_to_2xnf(system):
     global subs
     global args
     global sbox_given
+    global sbox_xnf_given
     global sbox_polys
     global sbox_xnf
+    global sboxes
     global origNumIndets
     global indetDict
     assert(not(args.lfirst and args.sfirst))
@@ -497,15 +346,23 @@ def anf_to_2xnf(system):
         system.sort(key=Anf.numTerms_nonLin)
         system.reverse()
     XNF = Xnf()
+    if args.onlyterms:
+        term_to_sub = {}
+        already_converted = set()
+    # insert S-Box XNFs if given
+    if sbox_xnf_given:
+        for sbox_indets in sboxes:
+            XNF.extend(getSBoxXnf(sbox_indets))
+    ### Main loop start
     # Loops over all polynomials in the system and converts them 1-by-1 to 2-XNF
     system_iter = iter(enumerate(system)) # to jump forward if sbox-polynomials are found
     for i, g in system_iter:
         if args.verbosity >= 15:
-            print(f"Now processing Polynomial {i+1}/{len(system)}", end=("\r" if args.verbosity < 40 else "\n"))
+            print(f"anf_to_2xnf: Now processing Polynomial {i+1}/{len(system)}", end=("\r" if args.verbosity < 40 else "\n"))
         if args.verbosity >= 40 and g.deg() > 1:
             tmp = g.numTerms_nonLin()
-            print(f"Terms of degree >1: {g.numTerms_nonLin()}, Indeterminates: {len(g.variables())}")
-        # check whether following polynomials are s-Box-Polynomials
+            print(f"anf_to_2xnf: Terms of degree >1: {g.numTerms_nonLin()}, Indeterminates: {len(g.variables())}")
+        ## substitute s-Box polynomials if possible
         if sbox_given and g.deg() > 1 and len(system)-i >= len(sbox_polys):
             candidates = set(system[i:i+len(sbox_polys)])
             indets = sorted(list({indet for f in candidates for indet in f.variables() }))
@@ -517,7 +374,7 @@ def anf_to_2xnf(system):
                     substituted = { p.substIndets(sbox_inds,ind_candidates) for p in sbox_polys }
                     if candidates == substituted:
                         if args.verbosity >= 40:
-                            print(f"Found S-Box polynomials! Now jump {len(sbox_polys)} steps further.")
+                            print(f"anf_to_2xnf: Found S-Box polynomials! Now jump {len(sbox_polys)} steps further.")
                         XNF.extend(getSBoxXnf(ind_candidates))
                         _ = [next(system_iter) for r in range(len(sbox_polys)-1)]
                         # also increase i in case those are the last polynomials in the system
@@ -527,9 +384,12 @@ def anf_to_2xnf(system):
                         break
             if found_sth:
                 continue
-        while g.deg() > 2:
-            # searches ind such that as many terms of deg >2 as possible are divisible by x[ind]
-            badTerms = [t for t in g.support if t.deg() > 2]
+        ## transform g to degree k
+        # represents g=xi*f+h to eliminate as many terms as possible and then introduces
+        # an additional variable y=f
+        while g.deg() > args.k and not(args.k == 0):
+            # searches ind such that as many terms of deg > args.k as possible are divisible by x[ind]
+            badTerms = [t for t in g.support if t.deg() > args.k]
             tmp = 0
             for i in g.variables():
                 # count number of terms divisible by x[i]
@@ -553,39 +413,82 @@ def anf_to_2xnf(system):
             # replace g = x[ind]*f+h by x[ind]*x[new_indet]+h
             g = Anf([[ind,new_indet]]) + h
             if args.verbosity >= 40:
-                print("Substituted:")
-                print(f"    {xi}*({f}) + {h}")
-                print(f" ~> {Anf([[ind,new_indet]])} + {h}")
-        if args.optimal_subs or args.optimal_subs_quad or args.linalg:
-            applySubs(subs,g)
-            if args.optimal_subs:
-                s = findOptimalSubs(g)
-            if args.optimal_subs_quad:
-                s = findOptimalSubs_quad(g)
-            if args.linalg:
-                s = findSubs_linalg(g)
-            subs.update(s)
-            if args.verbosity >= 40:
-                print(f"Represented polynomial using {len(s)} substitutions."+" "*30)
-            for sub in s:
-                g = g + sub.getAnf()
-        # quick substituion if args.onlyterms
-        if args.onlyterms:
+                print("anf_to_2xnf: Substituted:")
+                print(f"anf_to_2xnf:     {xi}*({f}) + {h}")
+                print(f"anf_to_2xnf:  ~> {Anf([[ind,new_indet]])} + {h}")
+        ## onlyterms substitution
+        # quickest substituion
+        if args.onlyterms or (args.k != 2 and g.deg() > 2):
+            if not(args.onlyterms):
+                print("WARNING: Not yet implemented. Onlyterms substitution is applied.")
             lin_terms = [s for s in g.support if s.deg() < 2] # also contains Term()
-            quad_terms = [s for s in g.support if s.deg() == 2]
-            for t in quad_terms:
+            nonlin_terms = [s for s in g.support if s.deg() >= 2]
+            for t in nonlin_terms:
                 # first check already found substitutions
-                # if onlyterms is set, then all substitutions are of the form x[i]*x[j]
-                sub = next((s for s in subs if t.indets == s.facs[0]|s.facs[1]),None)
-                if sub is None:
-                    sub = Sub([frozenset({max(t.indets)}),frozenset({min(t.indets)})])
+                # if onlyterms is set, then all substitutions are of the form x[i1]*...*x[is]
+                if t in already_converted:
+                    sub = term_to_sub[t]
+                else:
+                    sub = Sub([frozenset({i}) for i in t.indets])
+                    already_converted.add(t)
+                    term_to_sub[t] = sub
                     subs.add(sub)
                 lin_terms.append(Term([sub.indet]))
             g = Anf(lin_terms)
-        # following loop is main part of function
+        ## check special cases
+        # check if g is already a lineral (e.g. if onlyterms loop was executed)
+        if g.deg() == 1:
+            XNF.append(lineral(g))
+            continue
+        # check if g is of the form g=l1*l2 (very fast!)
+        factors = g.factor_quad()
+        if [ f.deg() for f in factors ] == [1,1]:
+            if args.verbosity >= 40:
+                print("anf_to_2xnf: Polynomial is a product of two linear polynomials, so we directly transform it to 2-XNF.")
+            XNF.append(xClause([lineral(factors[0]),lineral(factors[1])]))
+            continue
+        assert(g.deg() == 2)
+        # check if g is of the form g=l1*l2+l3 (-> direct subsitution to 2-XNF)
+        qrk = g.qrk()
+        if qrk == 0:
+            [(l1,l2)],l3 = optimal_repr(g)
+            XNF.extend(special_poly_to_xnf(l3,[l1,l2]).getXClauses())
+            continue
+        # check if g is of the form g=l1*l2+l3*l4+1 (-> direct substitution to 2-XNF)
+        if qrk == 1:
+            [(l1,l2),(l3,l4)], l = optimal_repr(g,reduced=True)
+            if l == 1:
+                # 2-XNF representation of g is <(l1+1)(l3+1), (l2+1)(l4+1), (l1+l4+1)(l2+l3+1)>
+                # (XNFs can be combined with 'and' operator)
+                g_clauses = [xClause([lineral(l1+1),lineral(l3+1)]),
+                             xClause([lineral(l2+1),lineral(l4+1)]),
+                             xClause([lineral(l1+l4+1),lineral(l2+l3+1)])]
+                XNF.extend(g_clauses)
+                continue
+        ## variable-optimal direct substituion of polynomial
+        if args.linalg:
+            applySubs_qrk(subs,g)
+            s = findSubs_linalg(g)
+            subs.update(s)
+            if args.verbosity >= 40:
+                print(f"anf_to_2xnf: Represented polynomial using {len(s)} additional variables."+" "*30)
+            g = g + sum((sub.getAnf() for sub in s),Anf())
+            # Now g is of the form l1*l2+l3
+            [(l1,l2)],l3 = optimal_repr(g)
+            XNF.extend(special_poly_to_xnf(l3,[l1,l2]).getXClauses())
+            g = Anf()
+        ## default search for 'good' substitution
+        # applies previously found substitutions and tries to find good ones that eliminate
+        # a large amount of terms
         while g.deg() == 2:
             if args.verbosity > 50:
-                print("Current poly:",g)
+                print("anf_to_2xnf: Current poly:",g)
+            # check if g is of the form g=l1*l2+l3
+            if g.qrk() == 0:
+                [(l1,l2)],l3 = optimal_repr(g)
+                XNF.extend(special_poly_to_xnf(l3,[l1,l2]).getXClauses())
+                g = Anf()
+                break
             # check if previous subs can be applied
             # has to be done in every iteration since new terms may be added with finSub_OMT or findSub_MaxSAT
             applySubs(subs,g)
@@ -601,23 +504,26 @@ def anf_to_2xnf(system):
             subs.add(sub)
             g = g + sub.getAnf()
             if args.verbosity >= 40:
-                print(f"Sub found! Remaining deg 2 terms: {g.numTerms_nonLin()}"+" "*30)
+                print(f"anf_to_2xnf: Sub found! Remaining deg 2 terms: {g.numTerms_nonLin()}"+" "*30)
             if args.verbosity >= 60:
-                print("Sub:",sub)
-        XNF.append(linPolyToXLit(g))
-    assert(i+1 == len(system))
-    # interreduces substitutions and returns the corresponding XNF
+                print("anf_to_2xnf: Sub:",sub)
+        if g != 0:
+            XNF.append(lineral(g))
+    ### Main loop end
+    if len(system) > 0:
+        # ensure that loop didn't terminate too early
+        assert(i+1 == len(system))
+    ## interreduces substitutions and returns the corresponding XNF
     if args.verbosity >= 15:
-        print("Interreducing Substitutions."+" "*10)
+        print("anf_to_2xnf: Interreducing Substitutions."+" "*10)
     XNF.extend(subsToXnf())
     if args.cleanup:
-        XNF.cleanup(origNumIndets,indetDict)
+        XNF.cleanup(origNumIndets)
     if args.cleanuphard:
-        XNF.cleanup(0,indetDict)
+        XNF.cleanup(0)
     if args.cleanupvariables:
-        XNF.cleanupVarnames(0,indetDict)
+        XNF.cleanupVarnames(0)
     return XNF
-
 
 
 def subsToXnf():
@@ -628,14 +534,7 @@ def subsToXnf():
         xClauses = [ sub.getXnf() for sub in subs ]
         # return flattened list
         return Xnf([c for cList in xClauses for c in cList])
-    global F2
-    import galois
-    if F2 is None:
-        # ignore TBB outdated version warning
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            F2 = galois.GF(2)
+    F2 = getF2()
     # first construct basis of polynomial vector space
     supps = []
     # following avoid calling sub.get_poly() multiple times
@@ -650,10 +549,9 @@ def subsToXnf():
     for i,p in enumerate(subs_polys):
         for t in p.support:
             M[B.index(t)][i] = 1
-    N = F2(M).row_reduce()
+    N = F2(M).row_space()
     # pivot indices of N
-    pivots = [ next((i for i,c in enumerate(row) if c == 1),-1) for row in N ]
-    pivots = [ p for p in pivots if p >= 0 ]
+    pivots = [ row.nonzero()[0][0] for row in N ]
     pivot_subs = [ subs_list[p] for p in pivots ]
     xClauses = []
     # add clauses from pivot subs
@@ -662,11 +560,10 @@ def subsToXnf():
     # add representations of non-pivot subs
     xClauses.extend([
         xClause(lineral(
-            [sub.indet]+[s.indet for j,(s,c) in enumerate(zip(pivot_subs,subRepr)) if c == 1],
+            [sub.indet]+[pivot_subs[j].indet for j in N[:,i].nonzero()[0]],
             False
         ))
         for i,sub in enumerate(subs_list)
-        for subRepr in [N[:,i]]
         if not(i in pivots)
     ])
     if args.verbosity >= 30:
@@ -680,21 +577,22 @@ def subsToXnf():
 # auxiliary functions
 
 sBoxVarNum = 0
-def getSBoxXnf(indets):
-    """Takes a list of indeterminates and returns the XNF of an S-Box (given in args.sBoxXnf in these indeterminates."""
+def getSBoxXnf(linerals):
+    """Takes a list of indeterminates and returns the XNF of an S-Box (given in sbox_xnf) in these indeterminates."""
     global sbox_xnf
     global indetDict
     global sBoxVarNum
     # numAdd = number of additional indets in the SBox-XNF
-    numAdd = sbox_xnf.numVars - len(indets)
+    numAdd = sbox_xnf.numVars - len(linerals)
     numIndets_before = len(indetDict)-1
     numIndets_after = len(indetDict)+numAdd
     for i in range(numIndets_before+1,numIndets_after):
         sBoxVarNum += 1
         indetDict[f"[additional S-Box variable {sBoxVarNum}]"] = i
-    # d : 
-    d = {**dict(zip(range(1,len(indets)+1),indets)), **dict(zip(range(len(indets)+1,sbox_xnf.numVars+1),range(numIndets_before+1,numIndets_after)))}
-    return [xClause([lineral([d[i] for i in l.lits],l.xnor) for l in c.xLits]) for c in sbox_xnf]
+    # d : {1,...,number of indets in sbox_xnf} -> {linerals[0],...,linerals[s],new indeterminate 1,...,new indeterminate r}
+    d = {**dict(zip(range(1,len(linerals)+1),linerals)),
+         **dict(zip(range(len(linerals)+1,sbox_xnf.numVars+1),list(range(numIndets_before+1,numIndets_after))))}
+    return [xClause([ lineral({ d[i] for i in l.lits },l.xnor) for l in c.xLits ]) for c in sbox_xnf]
 
 
 
@@ -808,12 +706,20 @@ if __name__!='__main__':
     parser.add_argument("--verbosity",type=int,default=0)
     parser.add_argument("-qi","--quadIterations",type=int,default=3000,
                         help="Set a maximum number of iterations for standard substitution (number of pairs checked for factorizing polynomials).")
+    parser.add_argument("--sparse", action="store_true",
+                        help="Reduces number of clauses in output (number of variables stays the same).")
+    parser.add_argument("--moreclauses", action="store_true",
+                        help="Enlarges number of clauses in output (number of variables stays the same).")
+    parser.add_argument("--fewer-linerals", action="store_true",
+                        help="Output contains fewer linerals within the XNF clauses.")
+    parser.add_argument("--k","-k", type=int, default=2,
+                        help="Set k s.t. the output XNF is in k-XNF.")
     args = parser.parse_args()
     # initialize 100 default indeterminates
     for i in range(1,100+1):
         indetDict["x["+str(i)+"]"] = i
 else:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("path",nargs='?',default=None,
                         help="Path of input. Input file has the following structure: The first line contains all indeterminates separated with a comma and AT LEAST ONE SPACE BAR, the other lines contain each exactly one polynomial. Polynomials sums (\'+\') of terms and a term is a product (\'*\') of indeterminates or simply \'1\'. Spaces and tabs are ignored and no indeterminate can be called 1. Comment lines are marked with a # at the beginning.")
     parser.add_argument("--seed", type=int,
@@ -830,16 +736,26 @@ else:
                         help="Stores the output XNF as DIMACS XCNF format in given path.")
     parser.add_argument("-cp","--ocnfpath",
                         help="Stores the output XNF as DIMACS CNF format in given path.")
+    parser.add_argument("-ap","--oanfpath",
+                        help="Stores the output XNF as ANF format in given path. (product of linear polynomials)")
     parser.add_argument("--oxnf", action="store_true",
                         help="If the input path is of the form name.ext, then the output XNF is stored in the file name.xnf as XNF format.")
     parser.add_argument("--oxcnf", action="store_true",
-                        help="If the input path is of the form name.ext, then the output XNF is stored in the file name.cnf as DIMACS XCNF format (CNF clauses + XOR constraints).")
+                        help="If the input path is of the form name.ext, then the output XNF is stored in the file name.xcnf as DIMACS XCNF format (CNF clauses + XOR constraints).")
     parser.add_argument("--ocnf", action="store_true",
                         help="If the input path is of the form name.ext, then the output XNF is stored in the file name.cnf as DIMACS CNF format.")
-    parser.add_argument("--txnf","--3xnf", action="store_true",
-                        help="Sets the output to 3-XNF (instead of 2-XNF). The number of indeterminates stays the same, but there may be fewer clauses.")
+    parser.add_argument("--blowupxcnf", action="store_true",
+                        help="Adds equivalent clauses to the XCNF output to improve propagation in some cases.")
+    parser.add_argument("--k","-k", type=int, default=2,
+                        help="Set k s.t. the output XNF is in k-XNF (set k=0 for any XNF output).")
+    parser.add_argument("-ll","--linerallength", type=int,
+                        help="Set maximal length of linerals in output.")
+    parser.add_argument("-cl","--cuttinglength", type=int, default=5,
+                        help="Set cutting length of linerals for CNF output, i.e., the maximal length of a lineral that is converted to CNF without additional variables.")
     parser.add_argument("--sparse", action="store_true",
                         help="Reduces number of clauses in output (number of variables stays the same).")
+    parser.add_argument("--fewer-linerals", action="store_true",
+                        help="Output contains fewer linerals within the XNF clauses.")
     parser.add_argument("--moreclauses", action="store_true",
                         help="Enlarges number of clauses in output (number of variables stays the same).")
     parser.add_argument("-c","--cleanup","--gcp", action="store_true",
@@ -858,10 +774,8 @@ else:
                         help="Trys to find good substitutions using linear relations on previously found substitutions.")
     parser.add_argument("--maxsat", action="store_true", default=False,
                         help="Use a MaxSAT solver to substitute as many quadratic terms as possible at once (needs pysat to be installed; see https://pysathq.github.io/installation/)")
-    parser.add_argument("--optimal_subs","-os", action="store_true", default=False,
-                        help="Substitute single polynomials optimally using a SAT solver (needs cryptominisat to be installed; see https://github.com/msoos/cryptominisat).")
-    parser.add_argument("--optimal_subs_quad","-osq", action="store_true", default=False,
-                        help="Same as --optimal_subs, but only substitutes quadratic terms (needs cryptominisat to be installed; see https://github.com/msoos/cryptominisat).")
+    parser.add_argument("--optimal_subs","-os","--optimal_subs_quad","-osq", action="store_true", default=False,
+                        help="Deprecated. Use --linalg instead.")
     parser.add_argument("-omt","--omt","-oms","--oms","--optimathsat", action="store_true", default=False,
                         help="Use the OMT solver OptiMathSAT to find subsitutions that substitute as many quadratic terms as possible at once (may be very inefficient).")
     parser.add_argument("--omspath", type=str, default=os.path.dirname(os.path.abspath(__file__))+"/optimathsat",
@@ -874,20 +788,31 @@ else:
                         help="Only for quadratic polynomials: converts the polynomials one after each other by the number of their terms of degree 2 (shortest first).")
     parser.add_argument("--randomize", action="store_true", default=False,
                         help="Makes standard conversion non-deterministic (for the cost of efficientcy).")
+    parser.add_argument("--show", action="store_true", default=False,
+                        help="Print output XNF to console.")
     args = parser.parse_args()
 
+    if args.optimal_subs:
+        raise Exception("--optimal_subs is deprecated. Use --linalg instead.")
     
     # guarantee that only one conversion type is used
-    assert(len([1 for i in [ args.onlyterms,
-                             args.linalg,
-                             args.maxsat,
-                             args.optimal_subs,
-                             args.optimal_subs_quad,
-                             args.omt
-                            ]
-                if i ]) < 2)
+    methods = [ args.onlyterms,
+                args.linalg,
+                args.maxsat,
+                args.omt
+               ]
+    assert(methods.count(True) < 2)
+
+        
+
+    # check whether k != 1 (1-XNF is not NP-complete)
+    assert(args.k == 0 or args.k >= 2)
+
+    # ensure cutting length is >= 3
+    assert(args.cuttinglength is None or args.cuttinglength >= 3)
     
-               
+    # ensure lineral length is >= 1
+    assert(args.linerallength is None or args.linerallength >= 1)
     
 
     if args.seed is not None:
@@ -898,26 +823,25 @@ else:
         quit()
     
     # checks for sBox input and tries to set default if exists
-    polys_ex = False
-    if args.sBoxPolys != None:
+    sbox_polys_given = False
+    if args.sBoxPolys is not None:
         sbox_indetDict = dict()
         sbox_indetDict["1"] = []
-        sbox_polys = set(readPolySys(args.sBoxPolys,sbox_indetDict))
+        sbox_polys = set(readPolySys(args.sBoxPolys,sbox_indetDict)[0])
         sbox_inds = sorted([ v for v in sbox_indetDict.values() if isinstance(v,int) ])
-        polys_ex = True
+        sbox_polys_given = True
     
-    xnf_ex = False
-    if args.sBoxXnf != None:
+    sbox_xnf_given = False
+    if args.sBoxXnf is not None:
         sbox_xnf = readXNF(args.sBoxXnf)
-        xnf_ex = True
+        sbox_xnf_given = True
     
-    sbox_given = False
-    if polys_ex and xnf_ex:
-        sbox_given = True
+    sbox_given = sbox_polys_given and sbox_xnf_given
     
         
     # now main body
-    system = [f for f in readPolySys(args.path,indetDict) if not(f == 0)]
+    system, sboxes = readPolySys(args.path,indetDict)
+    system = [ f for f in system if f != 0 ]
     origNumIndets = len(indetDict)-1
 
     if len(system) == 0:
@@ -939,9 +863,17 @@ else:
         quit()
         
     XNF = anf_to_2xnf(system)
-    
-    
-        
+
+    # reduce linerals
+    if args.linerallength is not None:
+        if args.linerallength == 1:
+            XNF = XNF.convertToCnf(args.cuttinglength)
+        elif args.linerallength == 2:
+            raise Exception("Not Yet Implemented.")
+        else:
+            XNF.cropLinerals(args.linerallength)
+
+
     if args.verbosity >= 5:
         print(f"ddv after conversion:                {XNF.ddv()}" + "".join([" " for i in range(70)]))
         print(f"number of variables after conversion: {XNF.getNumVars()}")
@@ -955,7 +887,7 @@ else:
 
 
 
-    if args.verbosity >= 100 and len(system) < 10 and len(XNF) < 60: # probably just a toy example
+    if (args.verbosity >= 100 and len(system) < 10 and len(XNF) < 60) or args.show: # probably just a toy example
         print("system:")
         print("  " + str(system))
         print("indeterminates:")
@@ -963,8 +895,8 @@ else:
         print(XNF)
             
     if args.oxcnf:
-        s = printIndets() + "\n" + XNF.asXcnf()
-        path = args.path.rsplit(".",1)[0] + ".cnf"
+        s = printIndets() + "\n" + XNF.asXcnf(args.blowupxcnf)
+        path = args.path.rsplit(".",1)[0] + ".xcnf"
         D = open(path, "w")
         print(s, file=D)
         D.close()
@@ -972,7 +904,7 @@ else:
             print(f"Created {path}")
         
     if args.ocnf:
-        s = printIndets() + "\n" + XNF.asCnf()
+        s = printIndets() + "\n" + XNF.asCnf(args.cuttinglength)
         path = args.path.rsplit(".",1)[0] + ".cnf"
         D = open(path, "w")
         print(s, file=D)
@@ -989,26 +921,34 @@ else:
         if args.verbosity > 0:
             print(f"Created {path}")
     
-    if args.oxcnfpath != None:
-        s = printIndets() + "\n" + XNF.asXcnf()
+    if args.oxcnfpath is not None:
+        s = printIndets() + "\n" + XNF.asXcnf(args.blowupxcnf)
         D = open(args.oxcnfpath, "w")
         print(s, file=D)
         D.close()
         if args.verbosity > 0:
             print(f"Created {args.oxcnfpath}")
         
-    if args.ocnfpath != None:
-        s = printIndets() + "\n" + XNF.asCnf()
+    if args.ocnfpath is not None:
+        s = printIndets() + "\n" + XNF.asCnf(args.cuttinglength)
         D = open(args.ocnfpath, "w")
         print(s, file=D)
         D.close()
         if args.verbosity > 0:
             print(f"Created {args.ocnfpath}")
         
-    if args.oxnfpath != None:
+    if args.oxnfpath is not None:
         s = printIndets() + "\n" + XNF.asXnf()
         D = open(args.oxnfpath, "w")
         print(s, file=D)
         D.close()
         if args.verbosity > 0:
             print(f"Created {args.oxnfpath}")
+
+    if args.oanfpath is not None:
+        indet_str = ", ".join([l for l in indetDict.keys() if l != "1"])
+        poly_strs = [ "*".join([f"({Anf(l)})" for l in c]) if len(c) > 1 else str(Anf(c[0]))
+                      for c in XNF ]
+        with open(args.oanfpath,"w") as f:
+            print(indet_str,file=f)
+            print("\n".join(poly_strs),file=f)

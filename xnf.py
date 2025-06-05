@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -O
 
 import sys
 import os
@@ -7,6 +7,7 @@ import time
 import copy # for deepcopy
 import itertools
 import random
+import anf
 
 F2 = None
 
@@ -45,7 +46,7 @@ class Xnf:
                 raise TypeError("Allowed types in list for constructing XNF: list, xClause, lineral.")
         # compute numVars
         if numVars == -1:
-            self.numVars = max(self.getVars(),default=0) # + [0] since otherwise argument could be empty
+            self.numVars = max(self.getVars(),default=0)
         else:
             self.numVars = numVars
     def __str__(self,ind_len=0):
@@ -141,9 +142,9 @@ class Xnf:
         s = "p xnf " + str(self.numVars) + " " + str(self.getNumClauses()) + "\n"
         s += "\n".join([xclause.asXnf() for xclause in self.xClauses])
         return s
-    def asXcnf(self) -> str:
+    def asXcnf(self,blowup=False) -> str:
         """Converts self into a string in DIMACS CNF file format with additional XOR literals (input for CryptoMiniSat)."""
-        xcnf = self.convertToXcnf()
+        xcnf = self.convertToXcnf(blowup)
         s = "p cnf " + str(xcnf.numVars) + " " + str(xcnf.getNumClauses()) + "\n"
         clause_strings = []
         for clause in xcnf.xClauses:
@@ -160,6 +161,8 @@ class Xnf:
     def isCnf(self) -> bool:
         """Checks whether self is in CNF."""
         return False in [len(xl) > 1 for xc in self.xClauses for xl in xc]
+    def isFalse(self) -> bool:
+        return xClause([]) in self.xClauses
     def ddv(self) -> list:
         """Returns ddv(self) as a list of integers [a_1,...,a_d] where a_i is the number of clauses of length i."""
         L = []
@@ -168,23 +171,23 @@ class Xnf:
                 L.extend([ 0 for i in range(len(c)-len(L))])
             L[len(c)-1] = L[len(c)-1] + 1
         return L
-    def cleanup(self,origNumIndets,indetDict):
+    def cleanup(self,origNumIndets):
         """Interreduces XOR clauses and updates self (Gaussian Constraint Propagation)."""
         sthChanged = True
-        while sthChanged:
+        while sthChanged and not(self.isFalse()):
             sthChanged = False
             sthChanged = self.reduceLins() or sthChanged
-            sthChanged = self.deleteVars(origNumIndets,indetDict) or sthChanged
-            sthChanged = self.cleanupVarnames(origNumIndets,indetDict) or sthChanged
+            sthChanged = self.deleteVars(origNumIndets) or sthChanged
+            sthChanged = self.cleanupVarnames(origNumIndets) or sthChanged
             sthChanged = self.update() or sthChanged
     def cleanup_light(self):
-        """Light version of cleanup (Gaussian Constraint Propagation); does not need indetDict."""
+        """Light version of cleanup (Gaussian Constraint Propagation)."""
         sthChanged = True
-        while sthChanged:
+        while sthChanged and not(self.isFalse()):
             sthChanged = False
-            sthChanged = self.reduceLins() or sthChanged
-            sthChanged = self.update() or sthChanged
-    def deleteVars(self,origNumIndets,indetDict):
+            sthChanged = self.reduceLins(keeporder=True) or sthChanged
+            sthChanged = self.update(keeporder=True) or sthChanged
+    def deleteVars(self,origNumIndets):
         """
         Only used after reduceLins(). Deletes redundant XOR literals that only describe indets greater than origNumIndets.
         Returns Boolean whether something was deleted.
@@ -201,24 +204,24 @@ class Xnf:
         # the following is just removing removed variables from indetDict
         # only because python can not do call by reference to overwrite indetDict
         removeKeys = []
-        for key, value in indetDict.items():
+        for key, value in anf.indetDict.items():
             if value in removeVars:
                 removeKeys.append(key)
         for key in removeKeys:
-            del indetDict[key]
+            del anf.indetDict[key]
         return len(remove) > 0
-    def cleanupVarnames(self,origNumIndets,indetDict):
+    def cleanupVarnames(self,origNumIndets):
         """Cleans up variable names such that all variables in {1,...,xnf.numVars}. Returns whether something has changed."""
         indets = list(set(self.getVars()+list(range(1,origNumIndets+1))))
         # delete indeterminates that are not part of self.getVars()
-        for key in [k for k in indetDict.keys() if not((indetDict[k] in indets) or (indetDict[k] == []) or (indetDict[k] < origNumIndets))]:
-            del indetDict[key]
+        for key in [k for k in anf.indetDict.keys() if not((anf.indetDict[k] in indets) or (anf.indetDict[k] == []) or (anf.indetDict[k] < origNumIndets))]:
+            del anf.indetDict[key]
         translateDict = dict()
         for i,v in enumerate(indets):
             translateDict[v] = i+1
-        for key, value in indetDict.items():
+        for key, value in anf.indetDict.items():
             if not(value == []) and value in translateDict.keys():
-                indetDict[key] = translateDict[value]
+                anf.indetDict[key] = translateDict[value]
         lookup = dict()
         vname = 0
         for i in indets:
@@ -228,30 +231,35 @@ class Xnf:
         for xClause in self.xClauses:
             for xLit in xClause.xLits:
                 xLit.lits = frozenset({lookup[lit] for lit in xLit.lits})
-    def convertToXcnf(self):
+    def convertToXcnf(self,blowup=False):
         """Returns an equivalent Xnf (in possibly more variables) which only contains clauses and pure XOR literals, i.e. can be used as input for CryptoMiniSat."""
-        cnf = Xnf([])
+        """If blowup is set, then the xnf is extended by all xClauses that are equivalent to an xClause in the xnf."""
+        xcnf = Xnf([])
         numVars = self.numVars
+        if blowup:
+            clauses = sum([ [c] if len(c) == 1 else c.equivalent_clauses() for c in self.xClauses ],[])
+        else:
+            clauses = self.xClauses
         auxVars = dict() # dictionary storing auxVars[xLit.lits] = corresponding additional variable
-        for xCl in self.xClauses:
+        for xCl in clauses:
             if len(xCl) == 1:
-                cnf.add(xCl)
+                xcnf.add(xCl)
                 continue
             newClause = xClause()
             for xLit in xCl.xLits:
                 if len(xLit) == 1:
                     newClause.add(xLit)
                     continue
-                if xLit.lits in auxVars:
+                if xLit.lits in auxVars.keys():
                     newClause.add(lineral([auxVars[xLit.lits]],xLit.xnor))
                 else:
                     numVars += 1
                     y = numVars
                     auxVars[xLit.lits] = y
                     newClause.add(lineral([y],xLit.xnor))
-                    cnf.add(lineral([y],False) + lineral(xLit.lits,True)) # add NOT(y XOR xLit) == (y <-> xLit)
-            cnf.add(newClause)
-        return cnf
+                    xcnf.add(lineral([y],False) + lineral(xLit.lits,True)) # add NOT(y XOR xLit) == (y <-> xLit)
+            xcnf.add(newClause)
+        return xcnf
     def convertToCnf(self,cuttingLength=5):
         """
         Returns an equivalent Xnf (in possibly more variables) which is in CNF.
@@ -284,13 +292,16 @@ class Xnf:
             if clause.len() > 1:
                 clauses.append(clause)
                 continue;
+            # now clause only contains one lineral
             xlit = clause[0]
             if xlit.xnor:
                 negs_list = [set(s) for k in range(len(xlit)+1) if k%2==0 for s in itertools.combinations(xlit.lits,k)]
             else:
                 negs_list = [set(s) for k in range(len(xlit)+1) if k%2==1 for s in itertools.combinations(xlit.lits,k)]
+            # create all clauses of the form {1,-2,3,4,-5,-6,7,...} for every
+            # s in negs_list where s is the set of negative values
             for s in negs_list:
-                clauses.append(xClause([[i] for i in xlit.lits-s|{-i for i in s}]))
+                clauses.append(xClause([ lineral(frozenset([i]),not(i in s)) for i in xlit.lits ]))
         return Xnf(clauses,numVars)
     def substitute(self,xlit):
         """Takes an lineral with literals x_1+...+x_r, and uses it to substitute x_1 it in the whole Xnf by x_2+...+x_r."""
@@ -351,24 +362,37 @@ class Xnf:
                 for c in deg1_lits: # suffices to be done at the end
                     randomSol[c.head()] = not(randomSol[c.head()] != c.evaluate(randomSol)) # != is XOR
                 return (step_counter,tuple(randomSol))
-    def reduceLins(self):
-        """Interreduces all pure XOR literals of self. Returns whether something has changed."""
+    def reduceLins(self,keeporder=False):
+        """
+        Interreduces all pure XOR literals of self and substitutes them into the XOR clauses.
+        Returns whether something has changed.
+        """
         sthChanged, xors = interreduced([ c[0] for c in self.xClauses if len(c) == 1 ])
         self.xClauses = [ c for c in self.xClauses if len(c) != 1 ]
         for x in xors:
             try: # strictly spoken one needs to do an update every iteration, but that is very expensive
                 self.substitute(x)
             except:
-                self.update()
+                self.update(keeporder=keeporder)
                 self.substitute(x)
         self.xClauses.extend([xClause(x) for x in xors])
         return sthChanged
-    def update(self):
+    def cropLinerals(self,k):
+        new_clauses = []
+        for i,c in enumerate(self.xClauses):
+            for j,l in enumerate(c):
+                if len(l) > k:
+                    new_l, info_clauses = l.crop(k)
+                    c[j] = new_l
+                    new_clauses.extend(info_clauses)
+        self.xClauses.extend(new_clauses)
+        self.numVars = max(self.getVars(),default=0)
+    def update(self,keeporder=False):
         """Updates all xClauses and removes the ones that evaluate to True. Return whether something has changed."""
         trues = []
         sthChanged = False
-        if True in [c.isFalse() for c in self.xClauses]:
-            self.xClauses = []
+        if any(c.isFalse() for c in self.xClauses):
+            self.xClauses = [xClause([])]
             return True
         for i,c in enumerate(self.xClauses):
             sthChanged = sthChanged or c.reduce()
@@ -376,7 +400,10 @@ class Xnf:
                 trues.append(i)
                 sthChanged = True
         # remove elements with index in "trues" from self.xClauses
-        self.xClauses = MakeSet([c for i,c in enumerate(self.xClauses) if not(i in trues)])
+        if keeporder:
+            self.xClauses = [c for i,c in enumerate(self.xClauses) if not(i in trues)]
+        else:
+            self.xClauses = MakeSet([c for i,c in enumerate(self.xClauses) if not(i in trues)])
         return sthChanged
     def evaluate(self,sol):
         """Evaluates self at sol where sol is a tuple with entries True, False such that sol[i] is substituted for x[i] (sol[0] is None)."""
@@ -471,6 +498,23 @@ class xClause:
     def __or__(self,other):
         """Returns a new xClause that is the conctenation of self and other."""
         return xClause(self.xLits + other.xLits)
+    def __lt__(self,other):
+        """Compares two XOR clauses with some order (not important which order, just has to be fixed)"""
+        if self == other:
+            return False
+        if len(self) < len(other):
+            return True
+        return max(lin for lin in self.xLits if not(lin in other.xLits)) \
+            < max(lin for lin in other.xLits if not(lin in self.xLits))
+    def __le__(self,other):
+        """Compares two XOR clauses with some order (not important which order)"""
+        return self == other or self < other
+    def __gt__(self,other):
+        """Compares two XOR clauses with some order (not important which order)"""
+        return other < self
+    def __ge__(self,other):
+        """Compares two XOR clauses with some order (not important which order)"""
+        return other <= self
     def __hash__(self):
         return hash(str(self))
     def add(self,l):
@@ -496,6 +540,7 @@ class xClause:
         """Takes a XOR literal and substitutes it in every XOR literal of self."""
         for i in range(len(self)):
             self.xLits[i].substitute(xlit)
+        self.xLits = [ l for l in self.xLits if not(l.isFalse()) ]
     def reduce(self):
         """Reduces the XOR literals such that they have pair-wise distinct leading terms."""
         len_bev = len(self.xLits)
@@ -516,9 +561,18 @@ class xClause:
         if sol[0] is not None:
             sol = tuple([None])+tuple(sol)
         return 1 in [xLit.evaluate(sol) for xLit in self.xLits]
+    def equivalent_clauses(self):
+        """Returns all clauses that are equivalent to self (including self)."""
+        if len(self) > 2:
+            raise Exception("Not Yet Implemented.")
+        l1,l2 = self.xLits
+        l3 = l1+l2
+        L = [ self, xClause([l1,l3]), xClause([l2,l3]) ]
+        return L
     def random(variables, k):
         """Returns a random clause of length <= k in the given variables."""
-        return xClause([lineral.random(variables) for i in range(random.randint(1,k))])
+        return xClause([lineral.random(variables) for i in range(k)])
+        # return xClause([lineral.random(variables) for i in range(random.randint(1,k))])
         
 
     
@@ -529,26 +583,40 @@ class lineral:
     def __init__(self, lits, xnor=None):
         if isinstance(lits,str): # also allowed to initialize with string of the form "-1+3"
             lits = [int(x) for x in lits.split("+")]
+        if isinstance(lits,anf.Anf): # converts linear ANF to lineral
+            assert(lits.deg() <= 1)
+            f = lits
+            self.lits = frozenset([t.getIndets().pop() for t in f.getSupport()-{anf.Term()}])
+            self.xnor = (anf.Term() in f.getSupport())
+            return
+        ## handle linerals in lits
+        # lineral({...,lineral},bool) is handelled the same as lineral+lineral({...},bool)
+        lins_in_lits = [ l for l in lits if isinstance(l,lineral) ]
+        if len(lins_in_lits) > 0:
+            lins_in_lits_sum = sum(lins_in_lits,lineral())
+            lits = [ l for l in lits if not(l in lins_in_lits) ]+lins_in_lits_sum.as_list()
+        assert(all(isinstance(l,int) for l in lits))
+        ## compute self.xnor
         if xnor is None:
             if len(lits) == 1: # more efficient to not use np.prod
                 self.xnor = bool(np.sign(lits[0]) == 1)
             else:
-                self.xnor = bool(np.prod([np.sign(l) for l in lits]) == 1) # needs bool(...) since otherwise the type is numpy.bool_
+                # following line needs bool(...) since otherwise the type is numpy.bool_
+                self.xnor = bool(np.prod([np.sign(l) for l in lits]) == 1)
         else:
             self.xnor = xnor
-        assert(all(isinstance(l,int) for l in lits))
+        ## final computation of self.lits
         if isinstance(lits,set) or isinstance(lits,frozenset):
-            lits = frozenset({abs(l) for l in lits})
+            assert(all(l > 0 for l in lits))
+            lits = frozenset(lits)
         elif isinstance(lits,list):
             lits = [abs(l) for l in lits]
-            lits = frozenset({ i for i in lits if lits.count(i) % 2 == 1 })
-        if 0 in lits:
-            lits.remove(0)
-            xnor = False
+            lits = frozenset({ i for i in lits if lits.count(i) % 2 })
         self.lits = lits
     def __str__(self):
         if self.lits == frozenset():
-            return str(not(self.xnor)) # empty XOR literal is False, empty XNOR literal true
+            # '.lower()' to distinguish from Boolean value
+            return str(not(self.xnor)).lower() # empty XOR literal is False, empty XNOR literal true
         s = "(" + "+".join([str(s) for s in sorted(list(self.lits))]) + ")"
         if not(self.xnor):
             s = "^" + s
@@ -641,7 +709,27 @@ class lineral:
         s += " ".join([str(s) for s in sorted(list(self.lits))])
         s += " 0"
         return s
-    # takes a lineral and uses it to substitute the first occuring variable
+    def crop(self,k):
+        """
+        Converts self to a lineral <= k using additional variables.
+        Returns a tuple (l,c) where l is the new lineral and c is the list of clauses
+        modelling the conversion.
+        """
+        assert(k > 2)
+        if len(self) <= k:
+            return (self,[])
+        L = sorted(list(self.lits),reverse=True)
+        ind_name = f"[var for substituting {lineral(L[k-1:])} in {str(self)}]"
+        if ind_name in anf.indetDict.keys():
+            add_var = anf.indNum(ind_name)
+        else:
+            add_var = len(anf.indetDict)
+            anf.indetDict[ind_name] = add_var
+        # l1 is conversion of self, l2 is add_var+remainder
+        l1, l2 = lineral(L[:k-1]+[add_var],self.xnor), lineral([add_var]+L[k-1:],False)
+        assert(self == l1+l2+1)
+        l2_crop, l2_clauses = l2.crop(k)
+        return l1, [xClause(l2_crop)]+l2_clauses
     def substitute(self,other):
         """Takes an lineral and substitutes its largest variable in self, if it is in self.lits."""
         if other.head() in self.lits:
@@ -750,18 +838,30 @@ if __name__=='__main__':
     parser.add_argument("--numClauses", action="store_true",
                         help="Prints number of clauses of input xnf.")
     parser.add_argument("--random","-r", nargs=4, metavar=('num_vars','num_clauses','k','sat'),
-                        help="Creates a random k-XNF with num_vars variables and num_clauses clauses. If sat==True, then the XNF is guaranteed to be satisfiable.")
+                        help="Creates a random k-XNF (ALL clauses are k-clauses) with num_vars variables and num_clauses clauses. If sat==True, then the XNF is guaranteed to be satisfiable.")
+    parser.add_argument("--seed","-s", type=int, default=random.randrange(sys.maxsize),
+                        help="Set seed for random XNF generation.")
+    parser.add_argument("--gcp","--cleanup",
+                        help="Applies Gaussian Constraint Propagation (GCP) to the input and stores the output in the given path.")
+    parser.add_argument("--print","-p", action="store_true",
+                        help="Prints the XNF after reading to the console.")
     parser.add_argument("-xcp","--oxcnfpath",
-                        help="If --random is used: stores the random XNF as DIMACS XCNF format in given path.")
+                        help="Outputs XNF as DIMACS XCNF format in given path.")
     parser.add_argument("-cp","--ocnfpath",
-                        help="If --random is used: Stores the random XNF as DIMACS CNF format in given path.")
+                        help="Outputs XNF as DIMACS CNF format in given path.")
     parser.add_argument("-xp","--oxnfpath",
-                        help="If --random is used: Stores the random XNF in XNF file format.")
+                        help="Outputs XNF in XNF file format.")
+    parser.add_argument("--blowupxcnf", action="store_true",
+                        help="Adds equivalent clauses to the XCNF output to improve propagation in some cases.")
     
     args = parser.parse_args()
 
+    random.seed(args.seed)
+        
     if args.path is not None:
         x = readXNF(args.path)
+    if args.print:
+        print(x)
     if args.ddv:
         print(x.ddv())
     if args.numVars:
@@ -782,24 +882,31 @@ if __name__=='__main__':
         x = Xnf.random(int(args.random[0]),int(args.random[1]),int(args.random[2]),args.random[3] in {"True","true","t","T"})
 
     if args.oxcnfpath is not None:
-        f = open(args.oxcnfpath,"w")
-        if x.comments != []:
-            print("\n".join(x.comments) + "\n" +  x.asXcnf(),file=f)
-        else:
-            print(x.asXcnf(),file=f)
-        f.close()
+        with open(args.oxcnfpath,"w") as f:
+            if x.comments != []:
+                print("\n".join(x.comments) + "\n" +  x.asXcnf(args.blowupxcnf),file=f)
+            else:
+                print(x.asXcnf(args.blowupxcnf),file=f)
+
     if args.ocnfpath is not None:
-        f = open(args.ocnfpath,"w")
-        if x.comments != []:
-            print("\n".join(x.comments) + "\n" + x.asCnf(),file=f)
-        else:
-            print(x.asCnf(),file=f)
-        f.close()
+        with open(args.ocnfpath,"w") as f:
+            if x.comments != []:
+                print("\n".join(x.comments) + "\n" + x.asCnf(),file=f)
+            else:
+                print(x.asCnf(),file=f)
+
     if args.oxnfpath is not None:
-        f = open(args.oxnfpath,"w")
-        if x.comments != []:
-            print("\n".join(x.comments) + "\n" + x.asXnf(),file=f)
-        else:
-            print(x.asXnf(),file=f)
-        f.close()
-    
+        with open(args.oxnfpath,"w") as f:
+            if x.comments != []:
+                print("\n".join(x.comments) + "\n" + x.asXnf(),file=f)
+            else:
+                print(x.asXnf(),file=f)
+
+
+    if args.gcp is not None:
+        x.cleanup_light()
+        with open(args.gcp,"w") as f:
+            if x.comments != []:
+                print("\n".join(x.comments) + "\n" + x.asXnf(),file=f)
+            else:
+                print(x.asXnf(),file=f)
