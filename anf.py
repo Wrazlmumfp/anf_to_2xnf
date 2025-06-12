@@ -15,14 +15,8 @@ def indNum(string):
 
 def indStr(num):
     """Returns string corresponding to indeterminate number"""
-    global indetDict
-    if num == 0:
-        return "1"
-    for key,value in indetDict.items():
-        if value == num:
-            return key
-    # probably test case
-    return "x[" + str(num) + "]"
+    global indetDict_rev
+    return indetDict_rev[num]
 
 
 F2 = None
@@ -41,7 +35,9 @@ def getF2():
 # dictionary that stores the indeterminate names, e.g. indetDict["x"] == 1
 # only positive integers allowed for indeterminate numbers
 indetDict = dict()
-indetDict["1"] = []
+indetDict_rev = dict()
+indetDict["1"] = 0
+indetDict_rev[0] = "1"
 
 class Anf:
     # support is a set of terms
@@ -243,7 +239,9 @@ class Anf:
         """If r is 0 then only a random quadratic non-zero polynomial is returned."""
         if len(indetDict) < n+1:
             for i in range(1,n+1):
-                indetDict["x["+str(i)+"]"] = i
+                name = f"x[{i}]"
+                indetDict[name] = i
+                indetDict_rev[i] = name
         if r == 0:
             terms = [ [] ]+[ [i,j] for i in range(1,n+1) for j in range(i,n+1) ]
             return Anf(random.sample(terms,random.randint(1,len(terms))))
@@ -256,7 +254,9 @@ class Anf:
         """If sat == True, then guarantees that the system is solvable."""
         if len(indetDict) < n+1:
             for i in range(1,n+1):
-                indetDict["x["+str(i)+"]"] = i
+                name = f"x[{i}]"
+                indetDict[name] = i
+                indetDict_rev[i] = name
         # inefficient (set of terms is computed for each polynomial separately), but easy to debug
         terms = [ [] ]+[ [i,j] for i in range(1,n+1) for j in range(i,n+1) ]
         if not(sat):
@@ -272,7 +272,9 @@ class Anf:
             deg = n
         if len(indetDict) < n+1:
             for i in range(1,n+1):
-                indetDict["x["+str(i)+"]"] = i
+                name = f"x[{i}]"
+                indetDict[name] = i
+                indetDict_rev[i] = name
         # first attempt: compute list of all terms and choose a random subset
         from itertools import chain, combinations
         allTerms = list(chain.from_iterable(combinations(range(1,n+1),r) for r in range(deg+1)))
@@ -285,7 +287,9 @@ class Anf:
             deg = n
         if len(indetDict) < n+1:
             for i in range(1,n+1):
-                indetDict["x["+str(i)+"]"] = i
+                name = f"x[{i}]"
+                indetDict[name] = i
+                indetDict_rev[i] = name
         # inefficient (set of terms is computed for each polynomial separately), but easy to debug
         if not(sat):
             return [Anf.random(n,deg) for i in range(s)]
@@ -338,7 +342,7 @@ class Term:
         if isinstance(indets,int):
             self.indets = frozenset({indets})
             return
-        if len(indets) == 0 or indets == [[]]:
+        if len(indets) == 0 or indets == [0]:
             self.indets = frozenset()
             return
         assert(not(0 in indets))
@@ -733,9 +737,9 @@ def linPolyToXLit(f):
     return xnf.lineral(f)
 
     
-def readPolySys(path,indetDict):
+def readPolySys(path,indetDict,indetDict_rev):
     """
-    Input: path to anf file and indetDict (to be filled)
+    Input: path to anf file, indetDict and indetDict_rev (to be filled)
     Ouptut: system of Anfs from file in given path
     For the structure of the input file see documentation.
     """
@@ -753,6 +757,7 @@ def readPolySys(path,indetDict):
     # remove empty indeterminates
     indets = [i for i in indets if not(i == "")]
     indetDict.update(dict(zip(indets,range(1,len(indets)+1))))
+    indetDict_rev.update(dict(zip(range(1,len(indets)+1),indets)))
     # if polyStr is "# S-Box x[1] x[2] x[3] x[4]", then the S-Box XNF with the indeterminates x[1],...,x[4] is inserted here
     sboxes = []
     for polyStr in [ l for l in L[1:] if len(l) > 0 and l.lower().startswith("# s-box ") ]:
@@ -931,7 +936,9 @@ else:
         if not(args.quiet):
             print("Seed was", args.seed)
         for i in range(1,int(args.randomquad[0])+1):
-            indetDict["x["+str(i)+"]"] = i
+            name = f"x[{i}]"
+            indetDict[name] = i
+            indetDict_rev[i]=name
         system = Anf.randomQuadSys(int(args.randomquad[0]),int(args.randomquad[1]),bool(args.randomquad[2]))
 
 
@@ -939,13 +946,15 @@ else:
         if not(args.quiet):
             print("Seed was", args.seed)
         for i in range(1,int(args.random[0])+1):
-            indetDict["x["+str(i)+"]"] = i
+            name = f"x[{i}]"
+            indetDict[name] = i
+            indetDict_rev[i]=name
         system = Anf.randomSys(n=int(args.random[0]),s=int(args.random[1]),deg=int(args.random[2]),sat=bool(args.random[3]))
 
 
         
     if args.path is not None:
-        system = readPolySys(args.path,indetDict)[0]
+        system = readPolySys(args.path,indetDict,indetDict_rev)[0]
 
     if args.output is not None:
         printPolySys(system,args.output)

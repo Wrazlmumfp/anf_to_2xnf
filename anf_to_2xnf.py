@@ -213,6 +213,7 @@ class Sub:
     is_term = False
     def __init__(self, facs): # assumes facs is already of the desired form
         global indetDict
+        global indetDict_rev
         global numSubs
         assert(not(frozenset() in facs))
         assert(len(facs) > 1)
@@ -222,15 +223,15 @@ class Sub:
         if key in indetDict.keys():
             self.indet = indNum(key)
         else:
-            # indetDict["1"]=[], so len(indetDict) = <number of variables>+1
+            # indetDict["1"] == 0, so len(indetDict) = <number of variables>+1
             self.indet = len(indetDict)
             indetDict[key] = self.indet
+            indetDict_rev[self.indet] = key
             numSubs += 1
         self.facs = facs
         if all(len(f) == 1 for f in self.facs):
             self.is_term = True
     def __str__(self):
-        global indetDict
         return indStr(self.indet) + " replaces (" + ")*(".join([str(Anf([[i] for i in fac-{0}])+(1 if 0 in fac else 0)) for fac in self.facs]) + ")"
     def __repr__(self):
         return str(self)
@@ -339,6 +340,7 @@ def anf_to_2xnf(system):
     global sboxes
     global origNumIndets
     global indetDict
+    global indetDict_rev
     assert(not(args.lfirst and args.sfirst))
     if args.lfirst:
         system.sort(key=Anf.numTerms_nonLin)
@@ -408,6 +410,7 @@ def anf_to_2xnf(system):
             else:
                 new_indet = len(indetDict)
                 indetDict[key] = new_indet
+                indetDict_rev[new_indet] = key
             # append y+f to system (y == name of new indeterminate)
             system.append(Anf([[new_indet]])+f)
             # replace g = x[ind]*f+h by x[ind]*x[new_indet]+h
@@ -515,7 +518,8 @@ def anf_to_2xnf(system):
         assert(i+1 == len(system))
     ## interreduces substitutions and returns the corresponding XNF
     if args.verbosity >= 15:
-        print("anf_to_2xnf: Interreducing Substitutions."+" "*10)
+        print("anf_to_2xnf: Interreducing Substitutions."+" "*10 if not args.onlyterms
+              else "anf_to_2xnf: Printing Stubstitutions")
     XNF.extend(subsToXnf())
     if args.cleanup:
         XNF.cleanup(origNumIndets)
@@ -524,6 +528,7 @@ def anf_to_2xnf(system):
     if args.cleanupvariables:
         XNF.cleanupVarnames(0)
     return XNF
+
 
 
 def subsToXnf():
@@ -581,6 +586,7 @@ def getSBoxXnf(linerals):
     """Takes a list of indeterminates and returns the XNF of an S-Box (given in sbox_xnf) in these indeterminates."""
     global sbox_xnf
     global indetDict
+    global indetDict_rev
     global sBoxVarNum
     # numAdd = number of additional indets in the SBox-XNF
     numAdd = sbox_xnf.numVars - len(linerals)
@@ -588,7 +594,9 @@ def getSBoxXnf(linerals):
     numIndets_after = len(indetDict)+numAdd
     for i in range(numIndets_before+1,numIndets_after):
         sBoxVarNum += 1
-        indetDict[f"[additional S-Box variable {sBoxVarNum}]"] = i
+        name=f"[additional S-Box variable {sBoxVarNum}]"
+        indetDict[name] = i
+        indetDict_rev[i]=name
     # d : {1,...,number of indets in sbox_xnf} -> {linerals[0],...,linerals[s],new indeterminate 1,...,new indeterminate r}
     d = {**dict(zip(range(1,len(linerals)+1),linerals)),
          **dict(zip(range(len(linerals)+1,sbox_xnf.numVars+1),list(range(numIndets_before+1,numIndets_after))))}
@@ -717,7 +725,9 @@ if __name__!='__main__':
     args = parser.parse_args()
     # initialize 100 default indeterminates
     for i in range(1,100+1):
-        indetDict["x["+str(i)+"]"] = i
+        name = f"x[{i}]"
+        indetDict[name] = i
+        indetDict[i] = name
 else:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("path",nargs='?',default=None,
@@ -765,7 +775,7 @@ else:
     parser.add_argument("-cv","--cleanupvariables", action="store_true",
                         help="Only does a variable cleanup (no GCP). May also delete free variables from the ANF.")
     parser.add_argument("-sx","--sBoxXnf", type=str, 
-                        help="Path to a previously comuted s-Box XNF. Only works in combination with --sBoxPolys.")
+                        help="Path to a previously comuted s-Box XNF.")
     parser.add_argument("-sp","--sBoxPolys", type=str, 
                         help="Path to a file containing S-Box polynomials that were used for computing the XNF in path --sBoxXnf. Only works in combination with --sBoxXnf.")
     parser.add_argument("--onlyterms", action="store_true", default=False,
@@ -826,8 +836,10 @@ else:
     sbox_polys_given = False
     if args.sBoxPolys is not None:
         sbox_indetDict = dict()
-        sbox_indetDict["1"] = []
-        sbox_polys = set(readPolySys(args.sBoxPolys,sbox_indetDict)[0])
+        sbox_indetDict["1"] = 0
+        sbox_indetDict_rev = dict()
+        sbox_indetDict_rev[0] = "1"
+        sbox_polys = set(readPolySys(args.sBoxPolys,sbox_indetDict,sbox_indetDict_rev)[0])
         sbox_inds = sorted([ v for v in sbox_indetDict.values() if isinstance(v,int) ])
         sbox_polys_given = True
     
@@ -840,11 +852,11 @@ else:
     
         
     # now main body
-    system, sboxes = readPolySys(args.path,indetDict)
+    system, sboxes = readPolySys(args.path,indetDict,indetDict_rev)
     system = [ f for f in system if f != 0 ]
     origNumIndets = len(indetDict)-1
 
-    if len(system) == 0:
+    if len(system) == 0 and len(sboxes) == 0:
         if args.verbosity >= 5:
             print("WARNING: Given system is empty.")
         
