@@ -348,9 +348,8 @@ def anf_to_2xnf(system):
         system.sort(key=Anf.numTerms_nonLin)
         system.reverse()
     XNF = Xnf()
-    if args.onlyterms:
-        term_to_sub = {}
-        already_converted = set()
+    term_to_sub = {}
+    already_converted = set()
     # insert S-Box XNFs if given
     if sbox_xnf_given:
         for sbox_indets in sboxes:
@@ -386,6 +385,36 @@ def anf_to_2xnf(system):
                         break
             if found_sth:
                 continue
+        # recognize products of linear polynomials
+        # case args.k == 2 is handled later
+        if not(args.onlyterms) and (args.k == 0 or (g.deg() <= args.k and not(args.k == 2))):
+            k = g.deg() if args.k == 0 else args.k
+            factors = g.linear_factors()
+            if len(factors) > 0:
+                # write g = product(factors)*f
+                f = g/np.prod(factors)
+                if args.verbosity >= 30:
+                    print("anf_to_2xnf: Found linear factors.")
+                key = f"[var for {f}]"
+                if f == Anf(1):
+                    g = Anf(0)
+                    clause = factors
+                    if args.verbosity >= 40:
+                        print(f"anf_to_2xnf: g = {'*'.join([f'({h})' for h in factors])} can directly be converted to XNF")
+                else:
+                    if key in indetDict.keys():
+                        new_indet = indNum(key)
+                    else:
+                        new_indet = len(indetDict)
+                        indetDict[key] = new_indet
+                        indetDict_rev[new_indet] = key
+                    g = Anf([new_indet])+f
+                    clause = factors+[Anf([new_indet])]
+                    if args.verbosity >= 40:
+                        print(f"anf_to_2xnf: Substituting {f} by {Anf([new_indet])} in {'*'.join([f'({h})' for h in factors])}*({f})")
+                XNF.add(xClause(clause))
+        if g == 0:
+            continue
         ## transform g to degree k
         # represents g=xi*f+h to eliminate as many terms as possible and then introduces
         # an additional variable y=f
@@ -404,7 +433,7 @@ def anf_to_2xnf(system):
             f = Anf([ t/xi for t in g.support if t.isDivisible(xi) ])
             h = g+xi*f
             # create additional indeterminate for substituting f
-            key = "[var for "+str(f)+"]"
+            key = f"[var for {f}]"
             if key in indetDict.keys():
                 new_indet = indNum(key)
             else:
@@ -422,7 +451,7 @@ def anf_to_2xnf(system):
         ## onlyterms substitution
         # quickest substituion
         if args.onlyterms or (args.k != 2 and g.deg() > 2):
-            if not(args.onlyterms):
+            if not(args.onlyterms) and args.verbosity > 10:
                 print("WARNING: Not yet implemented. Onlyterms substitution is applied.")
             lin_terms = [s for s in g.support if s.deg() < 2] # also contains Term()
             nonlin_terms = [s for s in g.support if s.deg() >= 2]
@@ -711,7 +740,6 @@ def OMSeqs(f,inds):
 import argparse
 if __name__!='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--verbosity",type=int,default=0)
     parser.add_argument("-qi","--quadIterations",type=int,default=3000,
                         help="Set a maximum number of iterations for standard substitution (number of pairs checked for factorizing polynomials).")
     parser.add_argument("--sparse", action="store_true",
@@ -873,8 +901,13 @@ else:
     
     if args.no_conversion:
         quit()
-        
-    XNF = anf_to_2xnf(system)
+
+    if 1 in system:
+        if args.verbosity >= 5:
+            print("WARNING: 1 contained in the input system. Returning unsatisfiable XNF.")
+        XNF = Xnf([[1],[-1]],numVars=1)
+    else:
+        XNF = anf_to_2xnf(system)
 
     # reduce linerals
     if args.linerallength is not None:

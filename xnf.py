@@ -454,6 +454,8 @@ class xClause:
                 self.xLits = xLits
             elif type(xLits[0]) == int:
                 self.xLits = [lineral(xLits)]
+            else:
+                self.xLits = [lineral(xLit) for xLit in xLits]
         elif type(xLits) == str:
             self.xLits = [lineral(xlit) for xlit in xLits.split() if xlit != "0"]
         else:

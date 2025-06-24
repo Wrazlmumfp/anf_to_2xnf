@@ -54,7 +54,7 @@ class Anf:
             return
         if isinstance(support,str):
             support = support.replace(" ","").replace("\t","").replace("\n","")
-            self.support = Anf([[indetDict[x] for x in t.split("*")] for t in support.split("+") if not(t == "0")]).support
+            self.support = Anf([[0] if t == "1" else [indetDict[x] for x in t.split("*")] for t in support.split("+") if not(t == "0")]).support
             return
         if isinstance(support,frozenset) and all(isinstance(t,Term) for t in support):
             self.support = support
@@ -89,14 +89,16 @@ class Anf:
     def print(self,termorder=None):
         if termorder == None:
             return str(self)
-        termorder = parseTO([self],termorder)
         if self == 0:
             return("0")
         if self == 1:
             return("1")
-        else:
+        if termorder is not None:
+            termorder = parseTO([self],termorder)
             supp = sorted(list(self.support),key=termorder)
-            return " + ".join([str(t) for t in reversed(supp)])
+        else:
+            supp = sorted(list(self.support))
+        return " + ".join([str(t) for t in reversed(supp)])
     def __repr__(self):
         return str(self)
     def __eq__(self,other):
@@ -120,7 +122,6 @@ class Anf:
         return max({t.deg() for t in self.support},default=-1)
     def LT(self,TO = None):
         """Returns the DegLex-leading term of self."""
-        TO = parseTO(self,TO)
         return max(self.support,key=TO)
     def numTerms(self) -> int:
         """Returns the number of terms in the support."""
@@ -158,7 +159,7 @@ class Anf:
         raise Exception(f"Cannot multiply ANF and {type(other)}.")
     def __truediv__(self,other):
         """Returns self/other if self is divisible by other."""
-        rem = f.copy()
+        rem = self.copy()
         g = Anf()
         t = other.LT()
         while rem != Anf():
@@ -176,7 +177,6 @@ class Anf:
             return Anf(0)
         elif other == 0:
             return self
-        TO = parseTO([self,other],TO)
         t = other.LT(TO)
         rem = Anf(self.getSupport())
         while rem != Anf(0) and rem.LT(TO).isDivisible(t):
@@ -234,6 +234,12 @@ class Anf:
         if len(output) > 2:
             output = sorted(output,key=len)[:2]
         return output
+    def linear_factors(self):
+        """Returns list [l1,...,ls] s.t. self==l1*...*ls*g where g has no linear factors."""
+        v = [ Anf([x]) for x in self.variables() ] + [Anf(1)]
+        poly_list = [x*self for x in v]
+        rels = linear_relations(poly_list)
+        return [ np.dot(v,l)+Anf(1) for l in rels ]
     def randomQuad(n,r=0):
         """Returns a random quadratic polynomial in n indeterminates that is the sum of r products of two linear polynomials (but may also be a sum of fewer factors)."""
         """If r is 0 then only a random quadratic non-zero polynomial is returned."""
@@ -552,15 +558,21 @@ def interreduced_lin(anfs,termorder = None, linsfirst = False):
     F2 = getF2()
     if anfs == []:
         return False, []
-    termorder = parseTO(anfs,termorder)
+    if termorder is not None:
+        termorder = parseTO(anfs,termorder)
     basis = set()
     for s in anfs:
         basis = basis | set(s.support) # union
     if linsfirst:
         basis = sorted([t for t in basis if t.deg() <= 1],key=termorder,reverse = True) \
-            + sorted([t for t in basis if t.deg() > 1],key=termorder,reverse = True)
+            + sorted([t for t in basis if t.deg() > 1],key=termorder,reverse = True) \
+            if termorder is not None else \
+               sorted([t for t in basis if t.deg() <= 1],reverse = True) \
+            + sorted([t for t in basis if t.deg() > 1],reverse = True)
     else:
-        basis = sorted(list(basis),key=termorder,reverse=True)
+        basis = sorted(list(basis),key=termorder,reverse=True) \
+            if termorder is not None else \
+               sorted(list(basis),reverse=True)
     # zero matrix of size len(anfs) >< len(basis)
     M = F2.Zeros((len(anfs),len(basis)))
     # write polynomials in matrix
@@ -895,14 +907,8 @@ def mat_prod(L):
 
 
 # -------------------------------------------------------------------------------
-import argparse
-if __name__!='__main__':
-    class dummy:
-        def __init__(self):
-            return
-    args = dummy()
-    args.verbosity = 0
-else:
+if __name__=='__main__':
+    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("path",nargs='?',default=None,
                         help="Path of input. Input file has the following structure: The first line contains all indeterminates separated with a comma and AT LEAST ONE SPACE BAR (important for reading in indeterminates of the form \'x[1,1]\'), the other lines contain each exactly one polynomial. Polynomials sums (\'+\') of terms and a term is a product (\'*\') of indeterminates or simply \'1\'. Spaces and tabs are ignored and no indeterminate can be called 1. Comment lines are marked with a # at the beginning.")
