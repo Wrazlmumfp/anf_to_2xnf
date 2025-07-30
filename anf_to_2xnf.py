@@ -480,6 +480,14 @@ def anf_to_2xnf(system):
             XNF.append(xClause([lineral(factors[0]),lineral(factors[1])]))
             continue
         assert(g.deg() == 2)
+        # check if g is of the form g = x*y + x*z + y*z (-> then <g> = <x*y, x*z, y*z>)
+        if g.numTerms() == 3 and g.numTerms_nonLin() == 3 and len(g.variables()) == 3 and all(len([ t for t in g.support if x in t.indets ])==2 for x in g.variables()):
+                l1,l2,l3 = list(g.variables())
+                g_clauses = [xClause([lineral([l1],False),lineral([l2],False)]),
+                             xClause([lineral([l1],False),lineral([l3],False)]),
+                             xClause([lineral([l2],False),lineral([l3],False)])]
+                XNF.extend(g_clauses)
+                continue
         # check if g is of the form g=l1*l2+l3 (-> direct subsitution to 2-XNF)
         qrk = g.qrk()
         if qrk == 0:
