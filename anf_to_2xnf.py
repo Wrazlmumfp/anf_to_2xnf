@@ -387,7 +387,7 @@ def anf_to_2xnf(system):
                 continue
         # recognize products of linear polynomials
         # case args.k == 2 is handled later
-        if not(args.onlyterms) and (args.k == 0 or (g.deg() <= args.k and not(args.k == 2))):
+        if not(args.onlyterms) and g.deg() > 1 and (args.k == 0 or (g.deg() <= args.k and not(args.k == 2))):
             k = g.deg() if args.k == 0 else args.k
             factors = g.linear_factors()
             if len(factors) > 0:
@@ -868,7 +868,7 @@ else:
         sbox_indetDict_rev = dict()
         sbox_indetDict_rev[0] = "1"
         sbox_polys = set(readPolySys(args.sBoxPolys,sbox_indetDict,sbox_indetDict_rev)[0])
-        sbox_inds = sorted([ v for v in sbox_indetDict.values() if isinstance(v,int) ])
+        sbox_inds = sorted([ v for v in sbox_indetDict.values() if isinstance(v,int) and v != 0 ])
         sbox_polys_given = True
     
     sbox_xnf_given = False
