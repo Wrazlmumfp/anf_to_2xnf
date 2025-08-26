@@ -960,62 +960,39 @@ else:
         print("indeterminates:")
         print("  " + str(indetDict))
         print(XNF)
-            
-    if args.oxcnf:
-        s = printIndets() + "\n" + XNF.asXcnf(args.blowupxcnf)
-        path = args.path.rsplit(".",1)[0] + ".xcnf"
-        D = open(path, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {path}")
-        
-    if args.ocnf:
-        s = printIndets() + "\n" + XNF.asCnf(args.cuttinglength)
-        path = args.path.rsplit(".",1)[0] + ".cnf"
-        D = open(path, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {path}")
-        
-    if args.oxnf:
-        s = printIndets() + "\n" + XNF.asXnf()
-        path = args.path.rsplit(".",1)[0] + ".xnf"
-        D = open(path, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {path}")
-    
-    if args.oxcnfpath is not None:
-        s = printIndets() + "\n" + XNF.asXcnf(args.blowupxcnf)
-        D = open(args.oxcnfpath, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {args.oxcnfpath}")
-        
-    if args.ocnfpath is not None:
-        s = printIndets() + "\n" + XNF.asCnf(args.cuttinglength)
-        D = open(args.ocnfpath, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {args.ocnfpath}")
-        
-    if args.oxnfpath is not None:
-        s = printIndets() + "\n" + XNF.asXnf()
-        D = open(args.oxnfpath, "w")
-        print(s, file=D)
-        D.close()
-        if args.verbosity > 0:
-            print(f"Created {args.oxnfpath}")
 
-    if args.oanfpath is not None:
-        indet_str = ", ".join([l for l in indetDict.keys() if l != "1"])
-        poly_strs = [ "*".join([f"({Anf(l)})" for l in c]) if len(c) > 1 else str(Anf(c[0]))
-                      for c in XNF ]
-        with open(args.oanfpath,"w") as f:
-            print(indet_str,file=f)
-            print("\n".join(poly_strs),file=f)
+
+    ############### PRINT OUTPUT ###############
+    
+    # set of tuples (file path, form) where form is xnf, xcnf or cnf
+    output_files = set()
+    base = args.path.rsplit(".", 1)[0]
+    if args.oxnf: output_files.add((f"{base}.xnf","xnf"))
+    if args.oxcnf: output_files.add((f"{base}.xcnf","xcnf"))
+    if args.ocnf: output_files.add((f"{base}.cnf","cnf"))
+
+    for p, fmt in [(args.oxnfpath, "xnf"),
+                   (args.oxcnfpath, "xcnf"),
+                   (args.ocnfpath, "cnf"),
+                   (args.oanfpath, "anf")]:
+        if p: output_files.add((p, fmt))
+
+    forms = {}
+    for path,form in output_files:
+        assert(form in ["xnf","xcnf","cnf","anf"])
+        if not(form in forms.keys()):
+            if form == "anf":
+                indet_str = ", ".join([l for l in indetDict.keys() if l != "1"])
+                poly_strs = [ "*".join([f"({Anf(l)})" for l in c]) if len(c) > 1 else str(Anf(c[0]))
+                              for c in XNF ]
+                forms[form] = "\n".join([indet_str]+poly_strs)
+            else:
+                forms[form] = printIndets() + "\n" + (
+                    XNF.asXnf() if form == "xnf" else
+                    XNF.asXcnf() if form == "xcnf" else
+                    XNF.asCnf()  # default case if form is none of the above
+                )
+        with open(path,"w") as f:
+            print(forms[form],file=f)
+        if args.verbosity > 0:
+            print(f"Created {path}")
