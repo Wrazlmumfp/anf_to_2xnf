@@ -385,6 +385,12 @@ def anf_to_2xnf(system):
                         break
             if found_sth:
                 continue
+        ## check special case
+        # check if g = x1*...*xn -> direct substitution
+        if g.numTerms() == 1:
+            XNF.append(xClause([lineral([x],False) for x in g.variables()]))
+            continue
+        ## check special case
         # recognize products of linear polynomials
         # case args.k == 2 is handled later
         if not(args.onlyterms) and g.deg() > 1 and (args.k == 0 or (g.deg() <= args.k and not(args.k == 2))):
@@ -448,6 +454,14 @@ def anf_to_2xnf(system):
                 print("anf_to_2xnf: Substituted:")
                 print(f"anf_to_2xnf:     {xi}*({f}) + {h}")
                 print(f"anf_to_2xnf:  ~> {Anf([[ind,new_indet]])} + {h}")
+        ## check special case
+        # check if g = y + x1*...*xn -> direct substitution
+        if g.numTerms() == 2 and g.deg() != 1 and any(t.deg() == 1 for t in g.support):
+            y = list(next(t for t in g.support if t.deg() == 1).indets)[0]
+            T = list(next(t for t in g.support if t.deg() > 1).indets)
+            XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
+            XNF.extend([ xClause([lineral([y],False),lineral([x])]) for x in T ])
+            continue
         ## onlyterms substitution
         # quickest substituion
         if args.onlyterms or (args.k != 2 and g.deg() > 2):
@@ -467,11 +481,12 @@ def anf_to_2xnf(system):
                     subs.add(sub)
                 lin_terms.append(Term([sub.indet]))
             g = Anf(lin_terms)
-        ## check special cases
+        ## check special cases deg 2
         # check if g is already a lineral (e.g. if onlyterms loop was executed)
         if g.deg() == 1:
             XNF.append(lineral(g))
             continue
+        assert(g.deg() == 2)
         # check if g is of the form g=l1*l2 (very fast!)
         factors = g.factor_quad()
         if [ f.deg() for f in factors ] == [1,1]:
@@ -479,7 +494,6 @@ def anf_to_2xnf(system):
                 print("anf_to_2xnf: Polynomial is a product of two linear polynomials, so we directly transform it to 2-XNF.")
             XNF.append(xClause([lineral(factors[0]),lineral(factors[1])]))
             continue
-        assert(g.deg() == 2)
         # check if g is of the form g = x*y + x*z + y*z (-> then <g> = <x*y, x*z, y*z>)
         if g.numTerms() == 3 and g.numTerms_nonLin() == 3 and len(g.variables()) == 3 and all(len([ t for t in g.support if x in t.indets ])==2 for x in g.variables()):
                 l1,l2,l3 = list(g.variables())
