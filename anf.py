@@ -751,7 +751,15 @@ def linPolyToXLit(f):
     """(obsolete: integrated in constructor of xnf.lineral)"""
     return xnf.lineral(f)
 
-    
+def to_sage(poly_str):
+    """
+    Converts a polynomial string into a format compatible with Sage.
+    Input: poly_str (str): A string representation of a polynomial.
+    Output: str: A modified string where '[' and ']' are replaced with '_' and ',' is replaced with '_'.
+    """
+    return poly_str.replace('[','_').replace(']','').replace(',','_')
+
+
 def readPolySys(path,indetDict,indetDict_rev):
     """
     Input: path to anf file, indetDict and indetDict_rev (to be filled)
@@ -773,7 +781,9 @@ def readPolySys(path,indetDict,indetDict_rev):
     indets = [i for i in indets if not(i == "")]
     indetDict.update(dict(zip(indets,range(1,len(indets)+1))))
     indetDict_rev.update(dict(zip(range(1,len(indets)+1),indets)))
-    # if polyStr is "# S-Box x[1] x[2] x[3] x[4]", then the S-Box XNF with the indeterminates x[1],...,x[4] is inserted here
+    if any("(" in l for l in L):
+        indetDict_anf = {to_sage(name): Anf([[ind]]) for name,ind in indetDict.items()}
+    # if polyStr is "# S-Box x[1], x[2], x[3], x[4]", then the S-Box XNF with the indeterminates x[1],...,x[4] is inserted here
     sboxes = []
     for polyStr in [ l for l in L[1:] if len(l) > 0 and l.lower().startswith("# s-box ") ]:
         linerals = polyStr[8:].removesuffix("\n").split(", ")
@@ -788,8 +798,13 @@ def readPolySys(path,indetDict,indetDict_rev):
     system = []
     for polyStr in [ l for l in L if len(l) > 0 ]:
         try:
-            system.append(Anf([[indetDict[x] for x in t.split("*")] for t in polyStr.split("+") if not(t == "0")]))
-        except KeyError as e: # throw error if an unknown indeterminate is used
+            # if parantheses appear in polyStr, eval is applied, otherwise not
+            # (second version is more efficient)
+            if "(" in polyStr:
+                system.append(eval(to_sage(polyStr),{},indetDict_anf))
+            else:
+                system.append(Anf([[indetDict[x] for x in t.split("*")] for t in polyStr.split("+") if not(t == "0")]))
+        except (NameError,KeyError) as e: # throw error if an unknown indeterminate is used
             raise NameError("Unknown indeterminate name: " + str(e)) from None
     return system, sboxes
 
