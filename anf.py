@@ -44,6 +44,7 @@ class Anf:
     support = frozenset()
     ntd2 = -1 # number of degree 2 terms
     my_qrk = None
+    vars = None
     def __init__(self,support = []):
         if isinstance(support,Term):
             self.support = frozenset({support})
@@ -116,7 +117,9 @@ class Anf:
         return hash(self.support)
     def variables(self) -> set:
         """Returns a set containing all variables (ints) occurring in self."""
-        return set().union(*[t.indets for t in self.support])
+        if self.vars is None:
+            self.vars = set().union(*[t.indets for t in self.support])
+        return self.vars
     def deg(self) -> int:
         """Returns the degree of the polynomial."""
         return max({t.deg() for t in self.support},default=-1)
