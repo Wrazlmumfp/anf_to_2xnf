@@ -44,6 +44,7 @@ class Anf:
     support = frozenset()
     ntd2 = -1 # number of degree 2 terms
     my_qrk = None
+    my_qcm = None
     vars = None
     def __init__(self,support = []):
         if isinstance(support,Term):
@@ -213,8 +214,7 @@ class Anf:
         return Anf(supp)
     def gradient(self):
         """Returns a tuple (None,deriv(self,x1),deriv(self,x2),...) (gradient(self)[i] should be the deriv(f,i))"""
-        v = sorted(list(self.variables()))
-        return {x: self.deriv(x) for x in v}
+        return {x: self.deriv(x) for x in self.variables()}
     def factor_quad(self):
         """Returns list [l1,l2] s.t. self == l1*l2. Returns [1,self] if no linear factors exist."""
         v = self.variables()
@@ -225,7 +225,7 @@ class Anf:
         c1 = {i: int(i in minTerm.indets) for i in v}
         Df = self.gradient()
         coeffs = {i: (Df[i].evaluate(c0)+Df[i].evaluate(c1))%2 for i in v}
-        l1 = sum([ Anf([[i]])*coeffs[i] for i in v ],Anf())
+        l1 = Anf([[i] for i in v if coeffs[i]])
         l2 = self.NR(l1)
         l2_ = self.NR(l1+Anf(1))
         if l2 == Anf(0):
@@ -315,11 +315,13 @@ class Anf:
     def QCM(self,v=None):
         """Returns the Quadratic Coefficient Matrix of self."""
         """Output is nxn matrix (a_ij) with a_ii = 0 and a_ij = 1 iff x_ix_j in supp(f)."""
-        if v is None:
-            v = list(self.variables())
-        n = len(v)
-        F2 = getF2()
-        return F2([ [ (v1 != v2 and Term([v1,v2]) in self.support) for v1 in v ] for v2 in v ])
+        if self.my_qcm is None:
+            if v is None:
+                v = list(self.variables())
+            n = len(v)
+            F2 = getF2()
+            self.my_qcm = F2([ [ (v1 != v2 and Term([v1,v2]) in self.support) for v1 in v ] for v2 in v ])
+        return self.my_qcm
     def qrk(self):
         """Returns the quadratic rank of self"""
         """qrk(0)=qrk(1)=qrk(l)=0 for linear polynomials l"""
