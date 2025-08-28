@@ -786,9 +786,14 @@ def readPolySys(path,indetDict,indetDict_rev):
     if any("(" in l for l in L):
         indetDict_anf = {to_sage(name): Anf([[ind]]) for name,ind in indetDict.items()}
     # if polyStr is "# S-Box x[1], x[2], x[3], x[4]", then the S-Box XNF with the indeterminates x[1],...,x[4] is inserted here
+    # alternatively, also "# insert x[1], x[2], ..." is allowed
     sboxes = []
-    for polyStr in [ l for l in L[1:] if len(l) > 0 and l.lower().startswith("# s-box ") ]:
-        linerals = polyStr[8:].removesuffix("\n").split(", ")
+    for polyStr in [ l for l in L[1:] if len(l) > 0 and (l.lower().startswith("# s-box ") or l.lower().startswith("# insert ")) ]:
+        if "s-box" in l.lower():
+            linerals = polyStr[8:]
+        else:
+            linerals = polyStr[9:]
+        linerals = linerals.removesuffix("\n").split(", ")
         linerals = [l.replace(" ","").replace("\t","") for l in linerals]
         # linerals that are only indeterminates are added as integer (for the sake of efficiency), other ones as linerals
         sboxes.append([ xnf.lineral(Anf(f)+1) if "+" in f else indNum(f) for f in linerals ])
