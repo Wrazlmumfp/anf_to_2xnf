@@ -902,7 +902,7 @@ else:
     
         
     # now main body
-    system, sboxes = readPolySys(args.path,indetDict,indetDict_rev)
+    system, sboxes, comments = readPolySys(args.path,indetDict,indetDict_rev)
     system = [ f for f in system if f != 0 ]
     origNumIndets = len(indetDict)-1
 
@@ -930,6 +930,10 @@ else:
         XNF = Xnf([[1],[-1]],numVars=1)
     else:
         XNF = anf_to_2xnf(system)
+
+    # add comments
+    comments_xnf = [ "c"+c.removeprefix("#") for c in comments ]
+    XNF.comments = comments_xnf
 
     # reduce linerals
     if args.linerallength is not None:

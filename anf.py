@@ -797,6 +797,7 @@ def readPolySys(path,indetDict,indetDict_rev):
         linerals = [l.replace(" ","").replace("\t","") for l in linerals]
         # linerals that are only indeterminates are added as integer (for the sake of efficiency), other ones as linerals
         sboxes.append([ xnf.lineral(Anf(f)+1) if "+" in f else indNum(f) for f in linerals ])
+    comments = [ l.strip() for l in L[1:] if l.startswith("#") ]
     L = [ l for l in L[1:] if not(l.startswith("#")) ]
     # remove spaces, tabs, newlines and exponents from polynomial strings
     for i,l in enumerate(L):
@@ -813,7 +814,7 @@ def readPolySys(path,indetDict,indetDict_rev):
                 system.append(Anf([[indetDict[x] for x in t.split("*")] for t in polyStr.split("+") if not(t == "0")]))
         except (NameError,KeyError) as e: # throw error if an unknown indeterminate is used
             raise NameError("Unknown indeterminate name: " + str(e)) from None
-    return system, sboxes
+    return system, sboxes, comments
 
 
 def printIndets():

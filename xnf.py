@@ -139,13 +139,15 @@ class Xnf:
         return len(self.xClauses)
     def asXnf(self) -> str:
         """Converts self into a string in XNF file format."""
-        s = "p xnf " + str(self.numVars) + " " + str(self.getNumClauses()) + "\n"
+        s = "\n".join(self.comments)+("\n" if len(self.comments) > 0 else "")
+        s += "p xnf " + str(self.numVars) + " " + str(self.getNumClauses()) + "\n"
         s += "\n".join([xclause.asXnf() for xclause in self.xClauses])
         return s
     def asXcnf(self,blowup=False) -> str:
         """Converts self into a string in DIMACS CNF file format with additional XOR literals (input for CryptoMiniSat)."""
         xcnf = self.convertToXcnf(blowup)
-        s = "p cnf " + str(xcnf.numVars) + " " + str(xcnf.getNumClauses()) + "\n"
+        s = "\n".join(self.comments)+"\n"
+        s += "p cnf " + str(xcnf.numVars) + " " + str(xcnf.getNumClauses()) + "\n"
         clause_strings = []
         for clause in xcnf.xClauses:
             if clause.len() > 1:
@@ -156,7 +158,8 @@ class Xnf:
     def asCnf(self,cuttingLength=5) -> str:
         """Converts self into a string in DIMACS CNF file format (introduces additional variables for substituting XOR literals)."""
         cnf = self.convertToCnf(cuttingLength)
-        s = "p cnf " + str(cnf.getNumVars()) + " " + str(cnf.getNumClauses()) + "\n"
+        s = "\n".join(self.comments)+"\n"
+        s += "p cnf " + str(cnf.getNumVars()) + " " + str(cnf.getNumClauses()) + "\n"
         return s + "\n".join([clause.asXnf() for clause in cnf.getClauses()])
     def isCnf(self) -> bool:
         """Checks whether self is in CNF."""
