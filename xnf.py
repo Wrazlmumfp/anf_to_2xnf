@@ -79,7 +79,7 @@ class Xnf:
         return Xnf(self.xClauses + other.xClauses,max(self.numVars,other.numVars))
     def __add__(self,other):
         """Same as __add__."""
-        return self and other
+        return self & other
     def deg(self):
         return max([len(c) for c in self.xClauses])
     def fromString(s):
