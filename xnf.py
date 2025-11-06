@@ -77,6 +77,9 @@ class Xnf:
     def __and__(self,other):
         """Takes one additional Xnf and returns a new Xnf whose clauses are the union of the given Xnfs."""
         return Xnf(self.xClauses + other.xClauses,max(self.numVars,other.numVars))
+    def __add__(self,other):
+        """Same as __add__."""
+        return self and other
     def deg(self):
         return max([len(c) for c in self.xClauses])
     def fromString(s):
