@@ -861,6 +861,9 @@ if __name__=='__main__':
                         help="Outputs XNF in XNF file format.")
     parser.add_argument("--blowupxcnf", action="store_true",
                         help="Adds equivalent clauses to the XCNF output to improve propagation in some cases.")
+    parser.add_argument("--solve",action="store_true",
+                        help="Solves input XNF with the random walk algorithm. Only for 2-XNF.")
+    
     
     args = parser.parse_args()
 
@@ -883,6 +886,12 @@ if __name__=='__main__':
         print("#variables:            "+str(x.getNumVars()))
         print("effective #variables:  "+str(x.getNumVars()-d[0]))
         print("average clause length: "+str(sum([j*(i+1) for i,j in enumerate(d)])/x.getNumClauses())[:5])
+    if args.solve:
+        steps,sol = x.solve_randomwalk()
+        print(f"c Number of steps to solve: {steps}")
+        sol_ints = [ i if b else -i for i,b in enumerate(sol) if i > 0 ]
+        print(f"s SATISFIABLE")
+        print(f"v {' '.join(str(i) for i in sol_ints)} 0")
 
     if args.random is not None:
         if len(args.random) != 4:
