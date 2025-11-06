@@ -603,7 +603,7 @@ class lineral:
         if len(lins_in_lits) > 0:
             lins_in_lits_sum = sum(lins_in_lits,lineral())
             lits = [ l for l in lits if not(l in lins_in_lits) ]+lins_in_lits_sum.as_list()
-        assert(all(isinstance(l,int) for l in lits))
+        assert(all(isinstance(l,int) and l for l in lits))
         ## compute self.xnor
         if xnor is None:
             if len(lits) == 1: # more efficient to not use np.prod
