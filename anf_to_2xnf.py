@@ -460,7 +460,7 @@ def anf_to_2xnf(system):
             y = list(next(t for t in g.support if t.deg() == 1).indets)[0]
             T = list(next(t for t in g.support if t.deg() > 1).indets)
             if y in T: # g = (y+1)*x2*...*xn
-                XNF.append(xClause([lineral([y],True)]+[lineral([x],False) for x in T if not(x==y)]))
+                XNF.append(xClause([lineral([y],False)]+[lineral([x],True) for x in T if not(x==y)]))
             else:
                 XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
                 XNF.extend([ xClause([lineral([y],False),lineral([x])]) for x in T ])
