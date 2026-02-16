@@ -459,8 +459,11 @@ def anf_to_2xnf(system):
         if g.numTerms() == 2 and g.deg() != 1 and any(t.deg() == 1 for t in g.support):
             y = list(next(t for t in g.support if t.deg() == 1).indets)[0]
             T = list(next(t for t in g.support if t.deg() > 1).indets)
-            XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
-            XNF.extend([ xClause([lineral([y],False),lineral([x])]) for x in T ])
+            if y in T: # g = (y+1)*x2*...*xn
+                XNF.append(xClause([lineral([y],True)]+[lineral([x],False) for x in T if not(x==y)]))
+            else:
+                XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
+                XNF.extend([ xClause([lineral([y],False),lineral([x])]) for x in T ])
             continue
         ## onlyterms substitution
         # quickest substituion
