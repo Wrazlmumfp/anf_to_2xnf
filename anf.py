@@ -804,7 +804,7 @@ def readPolySys(path,indetDict,indetDict_rev):
         L[i] = l.replace(" ","").replace("\t","").replace("\n","")
         L[i] = re.sub(r"\^[0-9]+","",L[i])
     system = []
-    for polyStr in [ l for l in L if len(l) > 0 ]:
+    for polyStr in [ l.replace("*1*","").replace("*1+","+").replace("+1*","+") for l in L if len(l) > 0 ]:
         try:
             # if parantheses appear in polyStr, eval is applied, otherwise not
             # (second version is more efficient)
