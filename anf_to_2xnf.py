@@ -996,7 +996,7 @@ else:
             else:
                 forms[form] = printIndets() + "\n" + (
                     XNF.asXnf() if form == "xnf" else
-                    XNF.asXcnf() if form == "xcnf" else
+                    XNF.asXcnf(blowup=args.blowupxcnf) if form == "xcnf" else
                     XNF.asCnf()  # default case if form is none of the above
                 )
         with open(path,"w") as f:

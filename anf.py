@@ -811,7 +811,7 @@ def readPolySys(path,indetDict,indetDict_rev):
             if "(" in polyStr:
                 system.append(eval(to_sage(polyStr),{},indetDict_anf))
             else:
-                system.append(Anf([[indetDict[x] for x in t.split("*")] for t in polyStr.split("+") if not(t == "0")]))
+                system.append(Anf([[indetDict[x] for x in t.split("*")] for t in polyStr.split("+") if not("0" in t.split("*")) ]))
         except (NameError,KeyError) as e: # throw error if an unknown indeterminate is used
             raise NameError("Unknown indeterminate name: " + str(e)) from None
     return system, sboxes, comments
@@ -953,6 +953,7 @@ if __name__=='__main__':
     parser.add_argument("--quiet","-q",action="store_true",
                         help="Does not print anything on console.")
     args = parser.parse_args()
+    
 
     if args.path is None and args.randomquad is None and args.random is None:
         parser.print_usage(sys.stderr)
