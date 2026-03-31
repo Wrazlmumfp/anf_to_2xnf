@@ -789,7 +789,7 @@ def readPolySys(path,indetDict,indetDict_rev):
     # alternatively, also "# insert x[1], x[2], ..." is allowed
     sboxes = []
     for polyStr in [ l for l in L[1:] if len(l) > 0 and (l.lower().startswith("# s-box ") or l.lower().startswith("# insert ")) ]:
-        if "s-box" in l.lower():
+        if "s-box" in polyStr.lower():
             linerals = polyStr[8:]
         else:
             linerals = polyStr[9:]

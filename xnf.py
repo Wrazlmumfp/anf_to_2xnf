@@ -601,7 +601,7 @@ class lineral:
         # lineral({...,lineral},bool) is handelled the same as lineral+lineral({...},bool)
         lins_in_lits = [ l for l in lits if isinstance(l,lineral) ]
         if len(lins_in_lits) > 0:
-            lins_in_lits_sum = sum(lins_in_lits,lineral())
+            lins_in_lits_sum = sum(lins_in_lits,lineral([]))
             lits = [ l for l in lits if not(l in lins_in_lits) ]+lins_in_lits_sum.as_list()
         assert(all(isinstance(l,int) and l for l in lits))
         ## compute self.xnor
