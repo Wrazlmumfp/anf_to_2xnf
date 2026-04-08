@@ -303,7 +303,6 @@ def special_poly_to_xnf(y,lins):
                    +[ xClause([ y+1, l+1 ]) for l in lins ]
                    )
     
-    
 
 def applySubs(subs,g):
     """Takes a list or set of substitutions subs and applies them to a polynomial g if this reduces the number of quadratic terms."""
@@ -391,6 +390,26 @@ def anf_to_2xnf(system):
             XNF.append(xClause([lineral([x],False) for x in g.variables()]))
             continue
         ## check special case
+        # check if g = y + x1*...*xn -> direct substitution
+        if g.numTerms() == 2 and g.deg() != 1 and any(t.deg() == 1 for t in g.support):
+            y = list(next(t for t in g.support if t.deg() == 1).indets)[0]
+            T = list(next(t for t in g.support if t.deg() > 1).indets)
+            if y in T: # g = (y+1)*x2*...*xn
+                XNF.append(xClause([lineral([y],False)]+[lineral([x],True) for x in T if not(x==y)]))
+            else:
+                XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
+                XNF.extend([ xClause([lineral([y],False),lineral([x],True)]) for x in T ])
+            continue
+        ## check special case
+        # check if g = l + x1*...*xn where l is linear
+        if g.numTerms_nonLin() == 1 and g.deg() <= args.k:
+            t = next(t for t in g.support if t.deg() > 1)
+            l = g+t
+            T = list(t.indets)
+            XNF.append(xClause([lineral(l)+lineral([T[0]])]+[lineral([x],False) for x in T[1:]]))
+            XNF.extend([ xClause([lineral(l),lineral([x])]) for x in T ])
+            continue
+        ## check special case
         # recognize products of linear polynomials
         # case args.k == 2 is handled later
         if not(args.onlyterms) and g.deg() > 1 and (args.k == 0 or (g.deg() <= args.k and not(args.k == 2))):
@@ -454,17 +473,6 @@ def anf_to_2xnf(system):
                 print("anf_to_2xnf: Substituted:")
                 print(f"anf_to_2xnf:     {xi}*({f}) + {h}")
                 print(f"anf_to_2xnf:  ~> {Anf([[ind,new_indet]])} + {h}")
-        ## check special case
-        # check if g = y + x1*...*xn -> direct substitution
-        if g.numTerms() == 2 and g.deg() != 1 and any(t.deg() == 1 for t in g.support):
-            y = list(next(t for t in g.support if t.deg() == 1).indets)[0]
-            T = list(next(t for t in g.support if t.deg() > 1).indets)
-            if y in T: # g = (y+1)*x2*...*xn
-                XNF.append(xClause([lineral([y],False)]+[lineral([x],True) for x in T if not(x==y)]))
-            else:
-                XNF.append(xClause([lineral([y,T[0]],False)]+[lineral([x],False) for x in T[1:]]))
-                XNF.extend([ xClause([lineral([y],False),lineral([x])]) for x in T ])
-            continue
         ## onlyterms substitution
         # quickest substituion
         if args.onlyterms or (args.k != 2 and g.deg() > 2):
@@ -573,7 +581,7 @@ def anf_to_2xnf(system):
     ## interreduces substitutions and returns the corresponding XNF
     if args.verbosity >= 15:
         print("anf_to_2xnf: Interreducing Substitutions."+" "*10 if not args.onlyterms
-              else "anf_to_2xnf: Printing Stubstitutions")
+              else "anf_to_2xnf: Printing Substitutions")
     XNF.extend(subsToXnf())
     if args.cleanup:
         XNF.cleanup(origNumIndets)
@@ -582,7 +590,6 @@ def anf_to_2xnf(system):
     if args.cleanupvariables:
         XNF.cleanupVarnames(0)
     return XNF
-
 
 
 def subsToXnf():
@@ -604,10 +611,11 @@ def subsToXnf():
     # B is the set of all terms occuring in one of the substitutions
     # called B since it is the basis of a later used vector space
     B = list(set(supps))
+    B_index = {t: i for i,t in enumerate(B)}
     M = F2.Zeros((len(B),len(subs_list)))
-    for i,p in enumerate(subs_polys):
-        for t in p.support:
-            M[B.index(t)][i] = 1
+    for i, p in enumerate(subs_polys):
+        rows = [B_index[t] for t in p.support]
+        M[rows, i] = 1
     N = F2(M).row_space()
     # pivot indices of N
     pivots = [ row.nonzero()[0][0] for row in N ]
