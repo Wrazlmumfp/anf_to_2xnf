@@ -42,7 +42,7 @@ indetDict_rev[0] = "1"
 class Anf:
     # support is a set of terms
     support = frozenset()
-    ntd2 = -1 # number of degree 2 terms
+    ntd2 = None # number of degree 2 terms
     my_qrk = None
     my_qcm = None
     vars = None
@@ -52,7 +52,7 @@ class Anf:
             return
         if isinstance(support,Anf):
             self.support = support.support
-            ntd2 = Anf.ntd2
+            ntd2 = support.ntd2
             return
         if isinstance(support,str):
             support = support.replace(" ","").replace("\t","").replace("\n","")
@@ -132,7 +132,7 @@ class Anf:
         return len(self.support)
     def numTerms_nonLin(self) -> int:
         """Returns the number of terms of degree 2 in the support."""
-        if self.ntd2 == -1:
+        if self.ntd2 is None:
             self.ntd2 = len([t for t in self.support if t.deg() > 1])
         return self.ntd2
     def __add__(self,other):
