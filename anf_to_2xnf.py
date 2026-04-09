@@ -402,7 +402,7 @@ def anf_to_2xnf(system):
             continue
         ## check special case
         # check if g = l + x1*...*xn where l is linear
-        if g.numTerms_nonLin() == 1 and g.deg() <= args.k:
+        if g.numTerms_nonLin() == 1 and g.deg() <= args.k or args.k == 0:
             t = next(t for t in g.support if t.deg() > 1)
             l = g+t
             T = list(t.indets)
