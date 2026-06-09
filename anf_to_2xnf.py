@@ -660,9 +660,14 @@ def getSBoxXnf(linerals):
         indetDict[name] = i
         indetDict_rev[i]=name
     # d : {1,...,number of indets in sbox_xnf} -> {linerals[0],...,linerals[s],new indeterminate 1,...,new indeterminate r}
-    d = {**dict(zip(range(1,len(linerals)+1),linerals)),
-         **dict(zip(range(len(linerals)+1,sbox_xnf.numVars+1),list(range(numIndets_before+1,numIndets_after))))}
-    return [xClause([ lineral({ d[i] for i in l.lits },l.xnor) for l in c.xLits ]) for c in sbox_xnf]
+    d = {**dict(zip(range(1,len(linerals)+1),
+                    linerals)),
+         **dict(zip(range(len(linerals)+1,sbox_xnf.numVars+1),
+                    range(numIndets_before+1,numIndets_after)))}
+    return [xClause( [ lineral([ d[i] for i in l.lits ])+lineral([],l.xnor)
+                       for l in c.xLits ])
+            for c in sbox_xnf
+            ]
 
 
 

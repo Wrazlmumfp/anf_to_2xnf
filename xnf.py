@@ -589,6 +589,10 @@ class lineral:
     lits = frozenset()
     xnor = True # if False, then lineral == XNOR(lits) == lits+1
     def __init__(self, lits, xnor=None):
+        if len(lits) == 0 and xnor is None:
+            self.lits = frozenset()
+            self.xnor = True
+            return
         if isinstance(lits,str): # also allowed to initialize with string of the form "-1+3"
             lits = [int(x) for x in lits.split("+")]
         if isinstance(lits,anf.Anf): # converts linear ANF to lineral
@@ -601,7 +605,7 @@ class lineral:
         # lineral({...,lineral},bool) is handelled the same as lineral+lineral({...},bool)
         lins_in_lits = [ l for l in lits if isinstance(l,lineral) ]
         if len(lins_in_lits) > 0:
-            lins_in_lits_sum = sum(lins_in_lits,lineral([]))
+            lins_in_lits_sum = sum(lins_in_lits,lineral([],False))
             lits = [ l for l in lits if not(l in lins_in_lits) ]+lins_in_lits_sum.as_list()
         assert(all(isinstance(l,int) and l for l in lits))
         ## compute self.xnor
