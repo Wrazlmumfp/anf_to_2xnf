@@ -840,8 +840,8 @@ else:
                         help="Same as cleanup, but also deletes free variables from the ANF.")
     parser.add_argument("-cv","--cleanupvariables", action="store_true",
                         help="Only does a variable cleanup (no GCP). May also delete free variables from the ANF.")
-    parser.add_argument("-sx","--sBoxXnf", type=str, 
-                        help="Path to a previously comuted s-Box XNF.")
+    parser.add_argument("--insert", "-sx","--sBoxXnf", type=str, 
+                        help="Path to a previously comuted XNF that should be inserted for '# insert x1, x2, ...'.")
     parser.add_argument("-sp","--sBoxPolys", type=str, 
                         help="Path to a file containing S-Box polynomials that were used for computing the XNF in path --sBoxXnf. Only works in combination with --sBoxXnf.")
     parser.add_argument("--onlyterms", action="store_true", default=False,
@@ -910,8 +910,8 @@ else:
         sbox_polys_given = True
     
     sbox_xnf_given = False
-    if args.sBoxXnf is not None:
-        sbox_xnf = readXNF(args.sBoxXnf)
+    if args.insert is not None:
+        sbox_xnf = readXNF(args.insert)
         sbox_xnf_given = True
     
     sbox_given = sbox_polys_given and sbox_xnf_given
@@ -921,6 +921,12 @@ else:
     system, sboxes, comments = readPolySys(args.path,indetDict,indetDict_rev)
     system = [ f for f in system if f != 0 ]
     origNumIndets = len(indetDict)-1
+
+    # throw warning if there are lines with '# insert' but --insert is not set
+    if len(sboxes) > 0 and args.insert is None:
+        if args.verbosity >= 5:
+            print("WARNING: File contains lines with '# insert' but --insert is not set.")
+            print("         Did you forget it?")
 
     if len(system) == 0 and len(sboxes) == 0:
         if args.verbosity >= 5:
