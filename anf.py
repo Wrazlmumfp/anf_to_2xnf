@@ -123,7 +123,7 @@ class Anf:
         return self.vars
     def deg(self) -> int:
         """Returns the degree of the polynomial."""
-        return max({t.deg() for t in self.support},default=-1)
+        return max((len(t.indets) for t in self.support),default=-1)
     def LT(self,TO = None):
         """Returns the DegLex-leading term of self."""
         return max(self.support,key=TO)
@@ -133,7 +133,7 @@ class Anf:
     def numTerms_nonLin(self) -> int:
         """Returns the number of terms of degree 2 in the support."""
         if self.ntd2 is None:
-            self.ntd2 = len([t for t in self.support if t.deg() > 1])
+            self.ntd2 = sum(1 for t in self.support if len(t.indets) > 1)
         return self.ntd2
     def __add__(self,other):
         """Returns a polynomial that is the sum of the two given ones."""
@@ -144,10 +144,16 @@ class Anf:
         if isinstance(other,str) and other in ["0","1"]:
             return self+int(other)
         if isinstance(other,Anf):
-            return Anf(self.support^other.support)
+            return Anf._from_support(self.support^other.support)
         if isinstance(other,Term):
             return self+Anf(other)
         raise Exception(f"Cannot add ANF and {type(other)}.")
+    @staticmethod
+    def _from_support(supp):
+        """Creates an Anf directly from a frozenset of Terms (skips all type checks of __init__)."""
+        a = Anf.__new__(Anf)
+        a.support = supp
+        return a
     def __mul__(self,other):
         """Returns a product that is the sum of the two given ones."""
         if other == 1:
@@ -320,7 +326,15 @@ class Anf:
                 v = list(self.variables())
             n = len(v)
             F2 = getF2()
-            self.my_qcm = F2([ [ (v1 != v2 and Term([v1,v2]) in self.support) for v1 in v ] for v2 in v ])
+            idx = {x: k for k, x in enumerate(v)}
+            M = np.zeros((n,n), dtype=np.uint8)
+            for t in self.support:
+                if len(t.indets) == 2:
+                    i, j = t.indets
+                    if i in idx and j in idx:
+                        M[idx[i], idx[j]] = 1
+                        M[idx[j], idx[i]] = 1
+            self.my_qcm = F2(M)
         return self.my_qcm
     def qrk(self):
         """Returns the quadratic rank of self"""
@@ -330,7 +344,7 @@ class Anf:
         if self in [0,1]:
             return 0
         if self.my_qrk is None:
-            self.my_qrk = int(max([0, np.linalg.matrix_rank(self.QCM())//2-1]))
+            self.my_qrk = max(0, _gf2_rank_qcm(self.support)//2-1)
         return self.my_qrk
         
         
@@ -424,6 +438,148 @@ class Term:
         return [int(i+1 in self.indets) for i in range(n)]
 
 
+def _gf2_rank_qcm(support):
+    """
+    Returns the rank over GF(2) of the quadratic coefficient matrix of the
+    polynomial with the given support. Rows are stored as Python ints (bitmasks).
+    """
+    rows = {}
+    for t in support:
+        if len(t.indets) == 2:
+            i, j = t.indets
+            rows[i] = rows.get(i, 0) ^ (1 << j)
+            rows[j] = rows.get(j, 0) ^ (1 << i)
+    # Gaussian elimination: basis indexed by highest set bit
+    basis = {}
+    for r in rows.values():
+        while r:
+            h = r.bit_length() - 1
+            b = basis.get(h)
+            if b is None:
+                basis[h] = r
+                break
+            r ^= b
+    return len(basis)
+
+
+def gf2_column_dependencies(cols):
+    """
+    Input: list cols of Python ints (bitmasks), the columns of a matrix over GF(2).
+    Output: tuple (pivots, reprs) where pivots is the list of indices of the columns that are
+    linearly independent of all previous columns (= pivot columns of the reduced row echelon
+    form) and reprs is a dict s.t. for every non-pivot column i, reprs[i] is the list of
+    positions p in pivots with cols[i] == sum(cols[pivots[p]] for p in reprs[i]).
+    """
+    # basis: highest bit -> (vector, bitmask over positions in pivots that sum up to vector)
+    basis = {}
+    pivots = []
+    reprs = {}
+    for i, v in enumerate(cols):
+        comb = 0
+        while v:
+            b = basis.get(v.bit_length() - 1)
+            if b is None:
+                break
+            v ^= b[0]
+            comb ^= b[1]
+        if v:
+            basis[v.bit_length() - 1] = (v, comb ^ (1 << len(pivots)))
+            pivots.append(i)
+        else:
+            reprs[i] = [ p for p in range(len(pivots)) if (comb >> p) & 1 ]
+    return pivots, reprs
+
+
+def _bits_to_lists(rows, n):
+    """Converts a list of bitmask rows to a list of lists of length n (bit j <-> column j)."""
+    return [ [ (r >> j) & 1 for j in range(n) ] for r in rows ]
+
+
+def _to_blockdiag_bits(M, n):
+    """
+    Same as to_blockdiag (exactly the same sequence of row and column operations), but the
+    n x n matrix M is given as list of rows stored as bitmasks (bit j <-> column j).
+    Returns (N, T) in the same format.
+    """
+    M = list(M)
+    T = [ 1 << i for i in range(n) ]
+    def nonzero_in_row(i):
+        # columns of the non-zero entries of row i in ascending order
+        r = M[i]
+        out = []
+        while r:
+            low = r & -r
+            out.append(low.bit_length() - 1)
+            r ^= low
+        return out
+    def swap_cols(a, b):
+        if a == b:
+            return
+        m = (1 << a) | (1 << b)
+        for r in range(n):
+            if ((M[r] >> a) ^ (M[r] >> b)) & 1:
+                M[r] ^= m
+    def swap_rows(A, a, b):
+        A[a], A[b] = A[b], A[a]
+    def add_col_to_col(i, j):
+        # add j-th column to i-th column
+        for r in range(n):
+            if (M[r] >> j) & 1:
+                M[r] ^= 1 << i
+    c = 0
+    while True:
+        # stop if M[c:,c:] == 0
+        high = ~((1 << c) - 1)
+        if all(M[r] & high == 0 for r in range(c, n)):
+            break
+        L = nonzero_in_row(c)
+        if L:
+            nz_row = L[0]
+        else:
+            # first non-zero entry (row-major order) in a row >= c
+            nz_row = next(r for r in range(c, n) if M[r])
+            nz_col = nonzero_in_row(nz_row)[0]
+            swap_cols(c, nz_col)
+            swap_rows(M, c, nz_col)
+            swap_rows(T, c, nz_col)
+        swap_cols(c+1, nz_row)
+        swap_rows(M, c+1, nz_row)
+        swap_rows(T, c+1, nz_row)
+        for one_row in nonzero_in_row(c):
+            if one_row == c+1:
+                continue
+            M[one_row] ^= M[c+1]
+            add_col_to_col(one_row, c+1)
+            T[one_row] ^= T[c+1]
+        for one_row in nonzero_in_row(c+1):
+            if one_row == c:
+                continue
+            M[one_row] ^= M[c]
+            add_col_to_col(one_row, c)
+            T[one_row] ^= T[c]
+        c += 2
+    return M, T
+
+
+def _gf2_inv(A):
+    """
+    Returns the inverse of the invertible square matrix A over GF(2).
+    A is given as list of lists with entries 0/1, the output has the same format.
+    Uses Gauss-Jordan elimination with rows stored as Python ints (bitmasks).
+    """
+    n = len(A)
+    # row i: bits 0..n-1 hold A[i], bits n..2n-1 hold the identity part
+    rows = [ sum(1 << j for j in range(n) if A[i][j]) | (1 << (n+i)) for i in range(n) ]
+    for c in range(n):
+        p = next(r for r in range(c, n) if (rows[r] >> c) & 1)
+        rows[c], rows[p] = rows[p], rows[c]
+        pr = rows[c]
+        for r in range(n):
+            if r != c and (rows[r] >> c) & 1:
+                rows[r] ^= pr
+    return [ [ (rows[i] >> (n+j)) & 1 for j in range(n) ] for i in range(n) ]
+
+
 def optimal_repr(anf,verbosity=0,reduced=False):
     """
     Input: ANF anf
@@ -434,11 +590,22 @@ def optimal_repr(anf,verbosity=0,reduced=False):
     if anf.deg() < 2:
         return [ [], anf ]
     inds = list(anf.variables())
-    M = anf.QCM(inds)
-    N, T = to_blockdiag(M)
-    T = np.linalg.inv(T)
-    assert((mat_prod([T,N,T.transpose()]) == M).all())
-    lins = [ Anf([ [ind] for i,ind in enumerate(inds) if col[i] ]) for j,col in enumerate(T.transpose()) ]
+    n = len(inds)
+    # quadratic coefficient matrix (same as anf.QCM(inds)) with rows stored as bitmasks;
+    # pure Python is much faster than galois for these small matrices
+    idx = {x: k for k, x in enumerate(inds)}
+    M = [0]*n
+    for t in anf.support:
+        if len(t.indets) == 2:
+            i, j = t.indets
+            M[idx[i]] |= 1 << idx[j]
+            M[idx[j]] |= 1 << idx[i]
+    N, T = _to_blockdiag_bits(M, n)
+    T_inv = _gf2_inv(_bits_to_lists(T, n))
+    assert(((np.array(T_inv) @ np.array(_bits_to_lists(N, n)) @ np.array(T_inv).T) % 2
+            == np.array(_bits_to_lists(M, n))).all())
+    # columns of T_inv
+    lins = [ Anf([ [ind] for i,ind in enumerate(inds) if T_inv[i][j] ]) for j in range(len(inds)) ]
     s = anf.qrk()
     quad_part = [ (lins[2*i],lins[2*i+1]) for i in range(s+1) ]
     lin_part = anf + sum([ l[0]*l[1] for l in quad_part ],Anf())
@@ -525,30 +692,27 @@ def linear_relations(anfs):
     c s.t. np.dot(anfs,c) == 0.
     """
     assert(all(isinstance(p,Anf) for p in anfs))
-    F2 = getF2()
-    if anfs == []:
+    if len(anfs) == 0:
         return []
-    basis = set()
-    for s in anfs:
-        basis = basis | set(s.support) # union
-    basis = list(basis)
-    # zero matrix of size len(basis) >< len(anfs)
-    M = F2.Zeros((len(basis),len(anfs)))
-    # write polynomials in matrix
-    for j,anf in enumerate(anfs):
+    # columns of the coefficient matrix as bitmasks (bit k <-> k-th term)
+    basis_index = {}
+    cols = []
+    for anf in anfs:
+        v = 0
         for t in anf.support:
-            M[basis.index(t)][j] = 1
-    M_red = M.row_space()
-    pivots = [ next((i for i,c in enumerate(row) if c),-1) for row in M_red ]
-    out = [ [0]*len(anfs) for i in range(len(anfs)) ]
+            v |= 1 << basis_index.setdefault(t, len(basis_index))
+        cols.append(v)
+    pivots, reprs = gf2_column_dependencies(cols)
+    # one relation for every non-pivot column (same as reading them off the reduced row echelon form)
+    out = []
     for i in range(len(anfs)):
-        if i in pivots:
-            continue
-        out[i][i] = 1
-        for j,c in enumerate(M_red[:,i]):
-            if c:
-                out[i][pivots[j]] = 1
-    return [ l for l in out if 1 in l ]
+        if i in reprs:
+            rel = [0]*len(anfs)
+            rel[i] = 1
+            for p in reprs[i]:
+                rel[pivots[p]] = 1
+            out.append(rel)
+    return out
 
 
         

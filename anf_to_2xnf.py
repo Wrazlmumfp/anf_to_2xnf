@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S python3 -O
 
 # tool for computing 2-XNF representations of polynomial systems
 # type python3 anf_to_2xnf.py -h for more information
@@ -45,9 +45,16 @@ def findSub_bracket(anf):
     assert(anf.deg() == 2)
     S = []
     inds = set().union(*[t.getIndets() for t in anf.support])
+    # neighbours[i] = { j : x[i]*x[j] in supp(anf) } (avoids testing all pairs i,j)
+    neighbours = {i: set() for i in inds}
+    for t in anf.support:
+        if len(t.indets) == 2:
+            i, j = t.indets
+            neighbours[i].add(j)
+            neighbours[j].add(i)
     # start with substitutions representing x[i]*(x[j1]+x[j2]+...)
     for i in inds:
-        j2 = {j for j in inds if Term({i,j}) in anf.support and i != j}
+        j2 = neighbours[i]
         if len(j2) > 0 and j2 != {i}:
             S.append(frozenset({frozenset({i}),frozenset(j2)}))
     # pairs that have to be considered
@@ -210,6 +217,7 @@ class Sub:
     facs = [] # [frozenset(int),...,frozenset(int)]
     indets = None
     anf = None
+    nonlin_terms = None
     is_term = False
     def __init__(self, facs): # assumes facs is already of the desired form
         global indetDict
@@ -253,6 +261,11 @@ class Sub:
             self.anf = Anf([[self.indet]]) \
                 +np.prod([ Anf(fac-{0}) + (1 if 0 in fac else 0) for fac in self.facs ])
         return self.anf
+    def getNonLinTerms(self):
+        """Returns the (cached) frozenset of terms of degree > 1 in self.getAnf()."""
+        if self.nonlin_terms is None:
+            self.nonlin_terms = frozenset(t for t in self.getAnf().support if len(t.indets) > 1)
+        return self.nonlin_terms
     def getFacs(self):
         """Returns the factors l1,l2 of this substitution."""
         return self.facs
@@ -306,12 +319,18 @@ def special_poly_to_xnf(y,lins):
 
 def applySubs(subs,g):
     """Takes a list or set of substitutions subs and applies them to a polynomial g if this reduces the number of quadratic terms."""
+    g_nonlin = {t for t in g.support if len(t.indets) > 1}
     for sub in subs:
+        # a substitution whose non-linear terms are disjoint from those of g can only
+        # increase the number of non-linear terms, so skip it without building new
+        if g_nonlin.isdisjoint(sub.getNonLinTerms()):
+            continue
         new = sub.applyTo(g)
         if new.numTerms_nonLin() < g.numTerms_nonLin():
             if args.verbosity >= 40:
                 print(f"Applied old sub! Reduced quad terms of g from {g.numTerms_nonLin()} to {new.numTerms_nonLin()}.")
             g = new
+            g_nonlin = {t for t in g.support if len(t.indets) > 1}
     return g
 
 
@@ -402,7 +421,7 @@ def anf_to_2xnf(system):
             continue
         ## check special case
         # check if g = l + x1*...*xn where l is linear
-        if g.numTerms_nonLin() == 1 and g.deg() <= args.k or args.k == 0:
+        if g.numTerms_nonLin() == 1 and (g.deg() <= args.k or args.k == 0):
             t = next(t for t in g.support if t.deg() > 1)
             l = g+t
             T = list(t.indets)
@@ -600,25 +619,20 @@ def subsToXnf():
         xClauses = [ sub.getXnf() for sub in subs ]
         # return flattened list
         return Xnf([c for cList in xClauses for c in cList])
-    F2 = getF2()
-    # first construct basis of polynomial vector space
-    supps = []
     # following avoid calling sub.get_poly() multiple times
     subs_list = list(subs)
     subs_polys = [ sub.getAnf() + Anf([[sub.getIndet()]]) for sub in subs_list ]
-    for i,p in enumerate(subs_polys):
-        supps.extend(p.getSupport())
-    # B is the set of all terms occuring in one of the substitutions
-    # called B since it is the basis of a later used vector space
-    B = list(set(supps))
-    B_index = {t: i for i,t in enumerate(B)}
-    M = F2.Zeros((len(B),len(subs_list)))
-    for i, p in enumerate(subs_polys):
-        rows = [B_index[t] for t in p.support]
-        M[rows, i] = 1
-    N = F2(M).row_space()
-    # pivot indices of N
-    pivots = [ row.nonzero()[0][0] for row in N ]
+    # columns of the coefficient matrix as bitmasks (bit k <-> k-th term)
+    B_index = {}
+    cols = []
+    for p in subs_polys:
+        v = 0
+        for t in p.support:
+            v |= 1 << B_index.setdefault(t, len(B_index))
+        cols.append(v)
+    # pivots = pivot columns of the reduced row echelon form,
+    # reprs[i] = positions of the pivot subs that sum up to the non-pivot sub i
+    pivots, reprs = gf2_column_dependencies(cols)
     pivot_subs = [ subs_list[p] for p in pivots ]
     xClauses = []
     # add clauses from pivot subs
@@ -627,11 +641,11 @@ def subsToXnf():
     # add representations of non-pivot subs
     xClauses.extend([
         xClause(lineral(
-            [sub.indet]+[pivot_subs[j].indet for j in N[:,i].nonzero()[0]],
+            [sub.indet]+[pivot_subs[j].indet for j in reprs[i]],
             False
         ))
         for i,sub in enumerate(subs_list)
-        if not(i in pivots)
+        if i in reprs
     ])
     if args.verbosity >= 30:
         print(f"Substitutions reduced from {len(subs_list)} to {len(pivots)}.")
@@ -867,6 +881,12 @@ else:
     parser.add_argument("--show", action="store_true", default=False,
                         help="Print output XNF to console.")
     args = parser.parse_args()
+
+    # The conversion creates millions of small objects (Terms, linerals, xClauses) but
+    # (almost) no reference cycles. The cyclic garbage collector therefore only costs
+    # time (repeatedly traversing all objects) without freeing memory, so disable it.
+    import gc
+    gc.disable()
 
     if args.optimal_subs:
         raise Exception("--optimal_subs is deprecated. Use --linalg instead.")

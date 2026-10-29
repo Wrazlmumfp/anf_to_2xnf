@@ -127,9 +127,7 @@ class Xnf:
         elif type(c) != xClause:
             raise TypeError("Can only append objects of type xClause or list to Xnf.")
         self.xClauses.append(c)
-        vars = [ v for xLit in c.xLits for v in xLit.lits ]
-        if vars != []:
-            self.numVars = max(self.numVars,max(vars))
+        self.numVars = max(self.numVars, max((v for xLit in c.xLits for v in xLit.lits), default=0))
     def extend(self,L):
         """Takes a list or set of xClauses and appends all of them to self."""
         for l in L:
@@ -159,11 +157,68 @@ class Xnf:
                 clause_strings.append(clause[0].asCnf())
         return s + "\n".join(clause_strings)
     def asCnf(self,cuttingLength=5) -> str:
-        """Converts self into a string in DIMACS CNF file format (introduces additional variables for substituting XOR literals)."""
-        cnf = self.convertToCnf(cuttingLength)
+        """
+        Converts self into a string in DIMACS CNF file format (introduces additional variables for substituting XOR literals).
+        Produces the same clauses (and variable numbering) as convertToCnf(cuttingLength), but writes them
+        directly as strings without creating xClause/lineral objects. The order of the clauses differs.
+        """
+        lines = []
+        # (lits, xnor) of all pure XOR constraints, in the same order as in convertToXcnf
+        units = []
+        auxVars = dict()
+        numVars = self.numVars
+        maxVar = 0
+        ## step 1: same as convertToXcnf (substitute linerals of length > 1 in clauses by new variables)
+        for xCl in self.xClauses:
+            if len(xCl.xLits) == 1:
+                l = xCl.xLits[0]
+                units.append((l.lits, l.xnor))
+                maxVar = max(maxVar, max(l.lits, default=0))
+                continue
+            lits_str = []
+            for xLit in xCl.xLits:
+                if len(xLit.lits) == 1:
+                    (x,) = xLit.lits
+                    maxVar = max(maxVar, x)
+                else:
+                    x = auxVars.get(xLit.lits)
+                    if x is None:
+                        numVars += 1
+                        x = numVars
+                        auxVars[xLit.lits] = x
+                        # y <-> xLit
+                        units.append((frozenset((x,)) ^ xLit.lits, False))
+                        maxVar = max(maxVar, x, max(xLit.lits, default=0))
+                lits_str.append(str(x) if xLit.xnor else "-" + str(x))
+            lines.append(" ".join(lits_str) + " 0")
+        ## step 2: same as convertToCnf (split long XOR constraints using additional variables)
+        numVars = maxVar
+        newUnits = [u for u in units if len(u[0]) <= cuttingLength]
+        oldUnits = [u for u in units if len(u[0]) > cuttingLength]
+        while oldUnits != []:
+            lits0, xnor0 = oldUnits.pop()
+            lits = list(lits0)
+            addVars = []
+            for i in range(-(-len(lits)//(cuttingLength-1))): # ceil division
+                numVars += 1
+                chunk = [numVars]+lits[(cuttingLength-1)*i:(cuttingLength-1)*i+(cuttingLength-1)]
+                newUnits.append((frozenset({j for j in chunk}), False))
+                addVars.append(numVars)
+            newUnit = (frozenset({j for j in addVars}), xnor0)
+            if len(newUnit[0]) > cuttingLength:
+                oldUnits.append(newUnit)
+            else:
+                newUnits.append(newUnit)
+        ## step 3: write each XOR constraint as CNF (all sign patterns with the wrong parity are excluded)
+        for lits, xnor in newUnits:
+            vs = sorted(lits)
+            pos = [str(i) for i in vs]
+            neg = ["-" + p for p in pos]
+            for negated in _sign_patterns(len(vs), xnor):
+                lines.append(" ".join([neg[b] if n else pos[b] for b, n in enumerate(negated)]) + " 0")
         s = "\n".join(self.comments)+("\n" if len(self.comments) > 0 else "")
-        s += "p cnf " + str(cnf.getNumVars()) + " " + str(cnf.getNumClauses()) + "\n"
-        return s + "\n".join([clause.asXnf() for clause in cnf.getClauses()])
+        s += "p cnf " + str(numVars) + " " + str(len(lines)) + "\n"
+        return s + "\n".join(lines)
     def isCnf(self) -> bool:
         """Checks whether self is in CNF."""
         return False in [len(xl) > 1 for xc in self.xClauses for xl in xc]
@@ -256,14 +311,14 @@ class Xnf:
                 if len(xLit) == 1:
                     newClause.add(xLit)
                     continue
-                if xLit.lits in auxVars.keys():
-                    newClause.add(lineral([auxVars[xLit.lits]],xLit.xnor))
+                if xLit.lits in auxVars:
+                    newClause.add(lineral(frozenset((auxVars[xLit.lits],)),xLit.xnor))
                 else:
                     numVars += 1
                     y = numVars
                     auxVars[xLit.lits] = y
-                    newClause.add(lineral([y],xLit.xnor))
-                    xcnf.add(lineral([y],False) + lineral(xLit.lits,True)) # add NOT(y XOR xLit) == (y <-> xLit)
+                    newClause.add(lineral(frozenset((y,)),xLit.xnor))
+                    xcnf.add(lineral(frozenset((y,)),False) + lineral(xLit.lits,True)) # add NOT(y XOR xLit) == (y <-> xLit)
             xcnf.add(newClause)
         return xcnf
     def convertToCnf(self,cuttingLength=5):
@@ -306,8 +361,14 @@ class Xnf:
                 negs_list = [set(s) for k in range(len(xlit)+1) if k%2==1 for s in itertools.combinations(xlit.lits,k)]
             # create all clauses of the form {1,-2,3,4,-5,-6,7,...} for every
             # s in negs_list where s is the set of negative values
+            # (single-variable linerals with pairwise distinct variables are sorted by
+            # variable in descending order, so the clause can be built pre-sorted)
+            vs = sorted(xlit.lits, reverse=True)
+            # frozensets are immutable, so they can safely be shared between linerals
+            vs_fs = [ (i, frozenset((i,))) for i in vs ]
+            new = lineral._new
             for s in negs_list:
-                clauses.append(xClause([ lineral(frozenset([i]),not(i in s)) for i in xlit.lits ]))
+                clauses.append(xClause._from_sorted([ new(fs, i not in s) for i, fs in vs_fs ]))
         return Xnf(clauses,numVars)
     def substitute(self,xlit):
         """Takes an lineral with literals x_1+...+x_r, and uses it to substitute x_1 it in the whole Xnf by x_2+...+x_r."""
@@ -466,7 +527,14 @@ class xClause:
             self.xLits = [lineral(xlit) for xlit in xLits.split() if xlit != "0"]
         else:
             raise TypeError("Allowed types in list for constructing xClause: list of lists of int, list of lineral, lineral, list of int.")
-        self.xLits.sort()
+        if len(self.xLits) > 1:
+            self.xLits.sort(key=_lineral_sort_key)
+    @staticmethod
+    def _from_sorted(xLits):
+        """Creates an xClause from a list of linerals that is already sorted (no checks, no sorting)."""
+        c = xClause.__new__(xClause)
+        c.xLits = xLits
+        return c
     def __str__(self):
         if self.xLits == []:
             return "False"
@@ -493,7 +561,7 @@ class xClause:
             self.xLits[index] = value
         else:
             raise TypeError("can only set objects of type list or lineral into an xClause")
-        self.xLits.sort()
+        self.xLits.sort(key=_lineral_sort_key)
     def __len__(self) -> int:
         """Returns number of linerals."""
         return len(self.xLits)
@@ -536,7 +604,7 @@ class xClause:
             self.xLits.append(l)
         else:
             raise TypeError("can only append objects of type list or lineral to an xClause")
-        self.xLits.sort()
+        self.xLits.sort(key=_lineral_sort_key)
     def extend(self,L):
         """Appends all linerals in a given list to the list of linerals."""
         for l in L:
@@ -589,6 +657,13 @@ class lineral:
     lits = frozenset()
     xnor = True # if False, then lineral == XNOR(lits) == lits+1
     def __init__(self, lits, xnor=None):
+        # fast path for the most frequent case: set of variables with explicitly given xnor
+        t = type(lits)
+        if (t is frozenset or t is set) and xnor is not None \
+           and not any(type(l) is lineral for l in lits):
+            self.lits = lits if t is frozenset else frozenset(lits)
+            self.xnor = xnor
+            return
         if len(lits) == 0 and xnor is None:
             self.lits = frozenset()
             self.xnor = True
@@ -610,11 +685,9 @@ class lineral:
         assert(all(isinstance(l,int) and l for l in lits))
         ## compute self.xnor
         if xnor is None:
-            if len(lits) == 1: # more efficient to not use np.prod
-                self.xnor = bool(np.sign(lits[0]) == 1)
-            else:
-                # following line needs bool(...) since otherwise the type is numpy.bool_
-                self.xnor = bool(np.prod([np.sign(l) for l in lits]) == 1)
+            # product of signs is +1 iff the number of negative literals is even
+            # (pure Python, much faster than np.prod/np.sign)
+            self.xnor = sum(1 for l in lits if l < 0) % 2 == 0
         else:
             self.xnor = xnor
         ## final computation of self.lits
@@ -625,6 +698,13 @@ class lineral:
             lits = [abs(l) for l in lits]
             lits = frozenset({ i for i in lits if lits.count(i) % 2 })
         self.lits = lits
+    @staticmethod
+    def _new(lits, xnor):
+        """Creates a lineral from a frozenset of positive ints and a bool (no checks)."""
+        l = lineral.__new__(lineral)
+        l.lits = lits
+        l.xnor = xnor
+        return l
     def __str__(self):
         if self.lits == frozenset():
             # '.lower()' to distinguish from Boolean value
@@ -710,6 +790,10 @@ class lineral:
         return max(self.lits,default=0)
     def asXnf(self):
         """Prints self for XNF file type, e.g. \'-1+2+3\'."""
+        if len(self.lits) == 1:
+            # fast path for single variables (by far the most frequent case in CNF output)
+            (x,) = self.lits
+            return str(x) if self.xnor else "-" + str(x)
         s = "+".join([str(s) for s in sorted(list(self.lits))])
         if not(self.xnor):
             s = "-" + s
@@ -756,6 +840,32 @@ class lineral:
     def random(variables):
         """Returns a random lineral in the given variables."""
         return lineral(random.sample(variables,random.randint(1,len(variables))),bool(random.getrandbits(1)))
+
+
+_sign_patterns_cache = {}
+def _sign_patterns(k, xnor):
+    """
+    Returns all tuples of k booleans (True = negated literal) whose number of True
+    entries is even if xnor is True and odd otherwise, i.e., the CNF clauses
+    of an XOR constraint of length k.
+    """
+    key = (k, xnor)
+    if key not in _sign_patterns_cache:
+        parity = 0 if xnor else 1
+        _sign_patterns_cache[key] = [ tuple(bool((m >> b) & 1) for b in range(k))
+                                      for m in range(1 << k) if bin(m).count("1") % 2 == parity ]
+    return _sign_patterns_cache[key]
+
+
+def _lineral_sort_key(l):
+    """
+    Sort key that induces exactly the same order as lineral.__lt__, but is much
+    faster for sorting (no Python-level comparison calls):
+    shorter linerals first; for equal length, the lineral containing the smallest
+    element of the symmetric difference is the larger one; for equal lits, XNOR
+    (xnor == False) comes before XOR.
+    """
+    return (len(l.lits), tuple(-x for x in sorted(l.lits)), l.xnor)
 
 
 def splitList(l,value):
